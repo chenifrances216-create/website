@@ -2,7 +2,12 @@
 
 (function () {
   const TOKEN_KEY = 'ship_token';
-  const STATUS_LABEL = { pending: 'Inasubiri', completed: 'Imekamilika', rejected: 'Imekataliwa' };
+  const STATUS_LABEL = {
+    pending: 'Inasubiri',
+    processing: 'Inatolewa',
+    completed: 'Imekamilika',
+    rejected: 'Imekataliwa',
+  };
   const INFLOW = new Set(['deposit', 'profit', 'signup_bonus', 'invite_bonus']);
 
   const app = {
@@ -219,6 +224,7 @@
     $$('.bottom-nav .bn-item').forEach((btn) => btn.classList.toggle('is-active', btn.dataset.go === view));
     window.scrollTo({ top: 0, behavior: 'smooth' });
     if (view === 'admin') loadAdmin();
+    if (view === 'withdraw') syncWithdrawAccount();
     if (view === 'history') renderHistory();
   }
 
@@ -265,7 +271,13 @@
     const sign = inflow ? '+' : '−';
     const cls = inflow ? 'amount--in' : 'amount--out';
     const status = STATUS_LABEL[txn.status] || txn.status;
-    const meta = [txn.method, txn.reference ? `Ref: ${txn.reference}` : null].filter(Boolean).join(' · ');
+    const meta = [
+      txn.method,
+      txn.payoutStatus === 'failed' ? 'Utoaji umeshindikana' : null,
+      txn.reference ? `Ref: ${txn.reference}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
     return `
       <div class="row">
         <div class="row__main">
@@ -441,7 +453,10 @@
       form.reset();
       app.user = data.user;
       await refresh();
-      toast('Ombi la utoaji limewasilishwa. Kiasi kimekatiwa kwenye salio.', 'ok');
+      const note = data.payout && data.payout.automatic
+        ? 'Ombi limewasilishwa. Msimamizi akikubali, pesa itatumwa moja kwa moja kwenye simu yako.'
+        : 'Ombi la utoaji limewasilishwa. Kiasi kimekatiwa kwenye salio.';
+      toast(note, 'ok');
       switchView('history');
     } catch (err) {
       toast(err.message, 'error');
@@ -504,7 +519,8 @@
     $('#admin-stats').innerHTML = `
       <div class="stat"><span>Watumiaji</span><strong>${s.users}</strong></div>
       <div class="stat"><span>Amana zinazosubiri</span><strong>${s.pendingDeposits}</strong></div>
-      <div class="stat"><span>Utoaji unazosubiri</span><strong>${s.pendingWithdrawals}</strong></div>
+      <div class="stat"><span>Utoaji unaosubiri</span><strong>${s.pendingWithdrawals}</strong></div>
+      <div class="stat"><span>Yanayotolewa sasa</span><strong>${s.processingWithdrawals || 0}</strong></div>
       <div class="stat"><span>Amana jumla</span><strong>${esc(tzs(s.totalDeposited))}</strong></div>
       <div class="stat"><span>Uwekezaji jumla</span><strong>${esc(tzs(s.totalInvested))}</strong></div>`;
 
@@ -517,6 +533,8 @@
             <strong>${esc(req.label)} · ${esc(tzs(req.amount))} ${req.method ? '· ' + esc(req.method) : ''}</strong>
             <span>${esc(req.user ? req.user.name : '—')} · ${esc(req.user ? req.user.phone : '')} · ${esc(fmtDate(req.createdAt))}</span>
             ${req.reference ? `<span>Ref: ${esc(req.reference)}</span>` : ''}
+            ${req.payoutStatus === 'failed' ? `<span class="status status--rejected">Utoaji umeshindikana: ${esc(req.failureReason || 'jaribu tena')}</span>` : ''}
+            ${req.providerRef ? `<span>Kumbukumbu ya malipo: ${esc(req.providerRef)}</span>` : ''}
           </div>
           <div class="admin-actions">
             <button class="btn btn--primary btn--sm" type="button" data-decide="approve" data-id="${esc(req.id)}">Kubali</button>
@@ -526,6 +544,25 @@
           )
           .join('')
       : emptyRow('Hakuna maombi yanayosubiri.');
+
+    const payouts = data.payouts || [];
+    if (payouts.length) {
+      $('#admin-requests').innerHTML +=
+        `<div class="row"><div class="row__main"><strong>Yanayotolewa sasa</strong><span>Malipo yaliyotumwa kwa mtoa huduma</span></div></div>` +
+        payouts
+          .map(
+            (p) => `
+        <div class="row">
+          <div class="row__main">
+            <strong>${esc(p.label)} · ${esc(tzs(p.amount))} · ${esc(p.method)}</strong>
+            <span>${esc(p.user ? p.user.name : '—')} · ${esc(p.phone || '')} · ${esc(fmtDate(p.createdAt))}</span>
+            ${p.providerRef ? `<span>Kumbukumbu: ${esc(p.providerRef)}</span>` : ''}
+          </div>
+          <div class="row__side"><span class="status status--processing">${esc(STATUS_LABEL.processing)}</span></div>
+        </div>`,
+          )
+          .join('');
+    }
 
     $('#admin-users').innerHTML = data.recentUsers.length
       ? data.recentUsers
@@ -590,7 +627,22 @@
     withdrawSelect.innerHTML = config.withdrawMethods
       .map((m) => `<option value="${esc(m)}">${esc(m)}</option>`)
       .join('');
+    withdrawSelect.addEventListener('change', syncWithdrawAccount);
     renderPayMethods();
+  }
+
+  function syncWithdrawAccount() {
+    const select = $('#withdraw-method');
+    const form = $('#withdraw-form');
+    if (!select || !form || !app.user) return;
+    const mobile = isMobileMethod(select.value);
+    if (mobile && !form.account.value) form.account.value = app.user.phone || '';
+    const hint = $('#withdraw-hint');
+    if (hint) {
+      hint.textContent = mobile
+        ? `Pesa itatumwa moja kwa moja kwenye ${select.value} baada ya msimamizi kukubali.`
+        : 'Pesa hutumwa kwenye akaunti yako ya benki baada ya msimamizi kukubali.';
+    }
   }
 
   /* ---------------- Malipo ya simu (M-Pesa / Tigo Pesa) ---------------- */
