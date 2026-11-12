@@ -578,14 +578,30 @@ function renderNumbers() {
   });
 
   $$('[data-delete-number]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (!window.confirm('Delete this deposit number?')) return;
-      try {
-        await api(`/deposit-numbers/${btn.dataset.deleteNumber}`, { method: 'DELETE' });
-        toast('Deposit number deleted');
-        await loadAll();
-      } catch (err) {
-        toast(err.message, true);
+    btn.addEventListener('click', () => {
+      const cell = btn.closest('td');
+      if (!cell) return;
+      const id = esc(btn.dataset.deleteNumber);
+      cell.innerHTML = `
+        <span class="tiny">Delete this number?</span>
+        <button class="btn small danger" data-confirm-number="${id}" type="button">Yes, delete</button>
+        <button class="btn small" data-cancel-number="1" type="button">Cancel</button>`;
+
+      const yes = cell.querySelector('[data-confirm-number]');
+      const no = cell.querySelector('[data-cancel-number]');
+      if (no) no.addEventListener('click', () => renderNumbers());
+      if (yes) {
+        yes.addEventListener('click', async () => {
+          yes.disabled = true;
+          try {
+            await api(`/deposit-numbers/${btn.dataset.deleteNumber}`, { method: 'DELETE' });
+            toast('Deposit number deleted');
+            await loadAll();
+          } catch (err) {
+            toast(err.message, true);
+            renderNumbers();
+          }
+        });
       }
     });
   });
