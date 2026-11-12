@@ -638,6 +638,10 @@ function createApp() {
   });
 
   // ---------- Tovuti ----------
+  app.get('/admin', (req, res) => {
+    res.sendFile(path.join(PUBLIC_DIR, 'admin.html'));
+  });
+
   app.use(express.static(PUBLIC_DIR, { extensions: ['html'], maxAge: '1h', index: 'index.html' }));
 
   app.use((req, res, next) => {
