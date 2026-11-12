@@ -1,912 +1,956 @@
 'use strict';
 
-(function () {
-  const TOKEN_KEY = 'ship_token';
-  const STATUS_LABEL = {
-    pending: 'Inasubiri',
-    processing: 'Inatolewa',
-    completed: 'Imekamilika',
-    rejected: 'Imekataliwa',
+/* Ship Transfer — single page app (English) */
+
+const TOKEN_KEY = 'ship.transfer.token';
+
+const state = {
+  token: null,
+  user: null,
+  config: null,
+  view: 'home',
+  filter: 'all',
+  transactions: [],
+  investments: [],
+  invite: null,
+  admin: null,
+  pendingDeposit: null,
+  investLevel: null,
+};
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+function esc(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[ch]));
+}
+
+function tzs(amount) {
+  const n = Number(amount || 0);
+  return `TZS ${Math.round(n).toLocaleString('en-US')}`;
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function fmtDay(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' });
+}
+
+let toastTimer = null;
+function toast(message, isError) {
+  const el = $('#toast');
+  if (!el) return;
+  el.textContent = message;
+  el.classList.toggle('error', Boolean(isError));
+  el.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('is-visible'), 4200);
+}
+
+async function api(path, options = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const res = await fetch(path, {
+    method: options.method || 'GET',
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (err) {
+    data = null;
+  }
+  if (!res.ok) {
+    const error = new Error((data && data.error) || `Request failed (${res.status})`);
+    error.status = res.status;
+    error.data = data;
+    throw error;
+  }
+  return data || {};
+}
+
+/* ---------------- auth ---------------- */
+
+function showAuth() {
+  $('#auth-screen').classList.remove('is-hidden');
+  $('#app-screen').classList.add('is-hidden');
+}
+
+function showApp() {
+  $('#auth-screen').classList.add('is-hidden');
+  $('#app-screen').classList.remove('is-hidden');
+  renderChrome();
+  go(state.view || 'home');
+}
+
+function setAuthTab(tab) {
+  $$('[data-auth-tab]').forEach((btn) => {
+    const active = btn.dataset.authTab === tab;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', String(active));
+  });
+  $$('[data-auth-pane]').forEach((pane) => {
+    pane.classList.toggle('is-hidden', pane.dataset.authPane !== tab);
+  });
+}
+
+function sessionUser(payload) {
+  state.token = payload.token || state.token;
+  state.user = payload.user || state.user;
+  if (payload.packages) state.config = { ...(state.config || {}), packages: payload.packages };
+  if (state.token) localStorage.setItem(TOKEN_KEY, state.token);
+}
+
+async function submitAuth(form, path) {
+  const body = {};
+  new FormData(form).forEach((value, key) => {
+    body[key] = String(value).trim();
+  });
+  const button = $('button[type="submit"]', form);
+  button.disabled = true;
+  try {
+    const data = await api(path, { method: 'POST', body });
+    sessionUser(data);
+    form.reset();
+    showApp();
+    toast(`Welcome, ${state.user.name.split(' ')[0]}!`);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function logout() {
+  api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  state.token = null;
+  state.user = null;
+  state.admin = null;
+  state.transactions = [];
+  state.investments = [];
+  localStorage.removeItem(TOKEN_KEY);
+  showAuth();
+  setAuthTab('login');
+}
+
+/* ---------------- chrome ---------------- */
+
+function renderChrome() {
+  if (!state.user) return;
+  $('#top-profit').textContent = tzs(state.user.balance);
+  $('#top-capital').textContent = tzs(state.user.capital);
+  $$('.nav-item').forEach((btn) => btn.classList.toggle('is-active', btn.dataset.go === state.view));
+}
+
+function setUser(user) {
+  if (user) state.user = user;
+  renderChrome();
+}
+
+async function refreshMe() {
+  const data = await api('/api/me');
+  setUser(data.user);
+  if (data.packages) state.config = { ...(state.config || {}), packages: data.packages };
+  return data.user;
+}
+
+/* ---------------- shared bits ---------------- */
+
+function statusBadge(txn) {
+  const status = txn.status === 'processing' ? 'processing' : txn.status;
+  const label = {
+    pending: 'Pending',
+    processing: 'Paying out',
+    completed: 'Completed',
+    rejected: 'Rejected',
+    failed: 'Failed',
+  }[status] || status;
+  return `<span class="badge ${esc(status)}">${esc(label)}</span>`;
+}
+
+function txnRow(txn) {
+  const inflow = ['deposit', 'profit', 'signup_bonus', 'invite_bonus'].includes(txn.type);
+  const icons = {
+    deposit: '↓',
+    withdraw: '↑',
+    invest: '🚢',
+    profit: '◆',
+    signup_bonus: '★',
+    invite_bonus: '＋',
   };
-  const INFLOW = new Set(['deposit', 'profit', 'signup_bonus', 'invite_bonus']);
+  const detail = [];
+  if (txn.method) detail.push(txn.method);
+  if (txn.type === 'withdraw' && txn.fee) detail.push(`fee ${tzs(txn.fee)} · you get ${tzs(txn.net)}`);
+  if (txn.createdAt) detail.push(fmtDate(txn.createdAt));
+  const amountLabel = txn.type === 'withdraw' ? `− ${tzs(txn.amount)}` : `${inflow ? '+' : '−'} ${tzs(txn.amount)}`;
+  return `
+    <div class="row">
+      <div class="row-ico ${txn.type === 'withdraw' ? 'out' : inflow ? '' : 'gold'}">${icons[txn.type] || '•'}</div>
+      <div class="row-main">
+        <strong>${esc(txn.label)}${txn.type === 'invest' && txn.note ? '' : ''}</strong>
+        <span>${esc(detail.join(' · ') || txn.note || '')}</span>
+      </div>
+      <div class="row-amt">
+        <strong class="${inflow ? 'in' : 'out'}">${amountLabel}</strong>
+        ${statusBadge(txn)}
+      </div>
+    </div>`;
+}
 
-  const app = {
-    user: null,
-    packages: [],
-    config: null,
-    txns: [],
-    investments: [],
-    invite: null,
-    admin: null,
-    view: 'dashboard',
-    filter: 'all',
-    dialogSubmit: null,
+function windowNotice(window = {}) {
+  const open = window.open !== false;
+  return `
+    <div class="notice ${open ? 'open' : 'closed'}">
+      <div>
+        <strong>${open ? 'Withdrawals are open now' : 'Withdrawals are closed'}</strong>
+        ${esc(window.message || '')} Monday – Friday, 10:00 – 17:00 EAT.
+      </div>
+    </div>`;
+}
+
+function rulesCard() {
+  const rules = (state.config && state.config.rules) || {};
+  return `
+    <div class="card">
+      <div class="section-title"><h3>Withdrawal rules</h3></div>
+      <ul class="rules">
+        <li>Minimum withdrawal: <b>${tzs(rules.minWithdraw || 3000)}</b></li>
+        <li>Service fee: <b>${Math.round((rules.withdrawFeeRate || 0.1) * 100)}%</b> of every withdrawal</li>
+        <li>Withdrawal days: <b>Monday – Friday only</b> (Saturday &amp; Sunday closed)</li>
+        <li>Withdrawal hours: <b>10:00 – 17:00 EAT</b></li>
+        <li>Only <b>profit</b> can be withdrawn — <b>capital stays locked</b></li>
+        <li>No daily profit is credited on Saturday or Sunday</li>
+      </ul>
+    </div>`;
+}
+
+/* ---------------- views ---------------- */
+
+function viewHome() {
+  const u = state.user;
+  const recent = state.transactions.slice(0, 5);
+  return `
+    <section class="card card-hero">
+      <h2>Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, ${esc(u.name.split(' ')[0])}</h2>
+      <p>Level ${esc(u.vipLevel || 0)} investor · ${esc(u.activeInvestments)} active ship${u.activeInvestments === 1 ? '' : 's'} · member since ${esc(fmtDay(u.createdAt))}</p>
+    </section>
+
+    <div class="grid-4">
+      <div class="stat green"><em>Profit balance</em><strong>${tzs(u.balance)}</strong><span class="tiny muted">Withdrawable</span></div>
+      <div class="stat gold"><em>Capital</em><strong>${tzs(u.capital)}</strong><span class="tiny muted">Locked</span></div>
+      <div class="stat"><em>Profit earned</em><strong>${tzs(u.totalProfit)}</strong><span class="tiny muted">All time</span></div>
+      <div class="stat"><em>Referral bonus</em><strong>${tzs(u.totalBonus)}</strong><span class="tiny muted">All time</span></div>
+    </div>
+
+    ${windowNotice(u.withdrawal)}
+
+    <div class="actions">
+      <button class="action" data-go="deposit"><span class="ico">↓</span>Deposit</button>
+      <button class="action" data-go="withdraw"><span class="ico">↑</span>Withdraw</button>
+      <button class="action" data-go="package"><span class="ico">🚢</span>Package</button>
+      <button class="action" data-go="invest"><span class="ico">◆</span>Invest</button>
+      <button class="action" data-go="invite"><span class="ico">＋</span>Invite</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title">
+        <h3>Recent activity</h3>
+        <button class="btn btn-ghost btn-sm" data-go="history" type="button">View all</button>
+      </div>
+      <div class="list">
+        ${recent.length ? recent.map(txnRow).join('') : '<p class="muted small">No activity yet. Make your first deposit to rent a ship.</p>'}
+      </div>
+    </div>
+
+    ${rulesCard()}`;
+}
+
+function viewDeposit() {
+  const cfg = state.config || {};
+  const methods = cfg.depositMethods || [];
+  const pay = cfg.payments || {};
+  const live = Boolean(pay.live);
+  const pending = state.pendingDeposit;
+  const options = methods
+    .map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`)
+    .join('');
+
+  const pendingCard = pending
+    ? `
+      <div class="card">
+        <div class="section-title"><h3>Deposit ${statusBadge(pending)}</h3><span class="muted small">${tzs(pending.amount)}</span></div>
+        <div class="kv">
+          <div><span>Reference</span><b>${esc(pending.id.slice(0, 8).toUpperCase())}</b></div>
+          <div><span>Method</span><b>${esc(pending.method)}</b></div>
+          ${pending.phone ? `<div><span>Phone</span><b>${esc(pending.phone)}</b></div>` : ''}
+          <div><span>Fee</span><b>TZS 0</b></div>
+        </div>
+        <p class="small muted" style="margin:12px 0 0">${
+          pending.channel === 'mobile_money'
+            ? 'Approve the payment prompt on your phone. The deposit is credited as soon as the payment is confirmed.'
+            : 'Transfer the amount to the account shown below, then an admin approves your deposit.'
+        }</p>
+        ${pending.channel === 'mobile_money' && !live
+          ? `<button class="btn btn-gold btn-sm" style="margin-top:12px" data-action="simulate" data-id="${esc(pending.id)}" type="button">Simulate payment (sandbox)</button>`
+          : ''}
+      </div>`
+    : '';
+
+  return `
+    <section class="card card-hero">
+      <h2>Deposit capital</h2>
+      <p>Deposits become locked capital. Use capital to rent a ship and start earning profit.</p>
+    </section>
+
+    <div class="card">
+      <div class="section-title"><h3>New deposit</h3><span class="muted small">Minimum ${tzs(cfg.minDeposit || 5000)}</span></div>
+      <form id="deposit-form" class="form" novalidate>
+        <label class="field">
+          <span>Amount (TZS)</span>
+          <input type="number" name="amount" min="${cfg.minDeposit || 5000}" step="500" placeholder="50000" required />
+        </label>
+        <label class="field">
+          <span>Payment method</span>
+          <select name="method" id="deposit-method" required>${options}</select>
+        </label>
+        <label class="field">
+          <span>Phone number for mobile money</span>
+          <input type="tel" name="phone" id="deposit-phone" value="${esc(state.user.phone)}" placeholder="0712 345 678" />
+        </label>
+        <button class="btn btn-primary" type="submit">Continue to payment</button>
+        <p class="form-note">${live ? 'You will get a payment prompt on your phone.' : 'Payments are in test mode — use the simulate button after creating the deposit.'}</p>
+      </form>
+    </div>
+
+    ${pendingCard}
+
+    <div class="card">
+      <div class="section-title"><h3>Company accounts</h3></div>
+      <div class="kv">
+        ${methods
+          .map(
+            (m) => `<div><span>${esc(m.label)}</span><b>${esc(m.account)}</b></div>`,
+          )
+          .join('')}
+      </div>
+      <p class="small muted" style="margin:12px 0 0">Account name: <strong>SHIP TRANSFER LTD</strong></p>
+    </div>`;
+}
+
+function viewWithdraw() {
+  const u = state.user;
+  const cfg = state.config || {};
+  const options = (cfg.withdrawOptions || [])
+    .map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`)
+    .join('');
+  return `
+    <section class="card card-hero">
+      <h2>Withdraw profit</h2>
+      <p>Available profit: <strong>${tzs(u.balance)}</strong> · Capital ${tzs(u.capital)} is locked.</p>
+    </section>
+
+    ${windowNotice(u.withdrawal)}
+
+    <div class="card">
+      <div class="section-title"><h3>Withdrawal request</h3><span class="muted small">Min ${tzs(cfg.minWithdraw || 3000)}</span></div>
+      <form id="withdraw-form" class="form" novalidate>
+        <label class="field">
+          <span>Amount (TZS)</span>
+          <input type="number" name="amount" id="withdraw-amount" min="${cfg.minWithdraw || 3000}" step="100" placeholder="5000" required />
+        </label>
+        <div class="kv" id="withdraw-summary">
+          <div><span>Service fee (10%)</span><b id="withdraw-fee">TZS 0</b></div>
+          <div><span>You receive</span><b id="withdraw-net">TZS 0</b></div>
+        </div>
+        <label class="field">
+          <span>Payout method</span>
+          <select name="method" id="withdraw-method" required>${options}</select>
+        </label>
+        <label class="field">
+          <span>Phone number / account</span>
+          <input type="text" name="account" id="withdraw-account" value="${esc(u.phone)}" required />
+        </label>
+        <button class="btn btn-primary" type="submit" ${u.withdrawal && u.withdrawal.open ? '' : 'disabled'}>
+          ${u.withdrawal && u.withdrawal.open ? 'Request withdrawal' : 'Withdrawals closed'}
+        </button>
+        <p class="form-note">Requests made outside Monday – Friday, 10:00 – 17:00 EAT are not accepted.</p>
+      </form>
+    </div>
+
+    ${rulesCard()}`;
+}
+
+function shipCard(pkg, compact) {
+  return `
+    <article class="ship-card">
+      <div class="ship-media">
+        <span class="ship-level">Level ${esc(pkg.level)}</span>
+        ${pkg.tag ? `<span class="ship-tag">${esc(pkg.tag)}</span>` : ''}
+        <img src="${esc(pkg.image)}" alt="${esc(pkg.shipName)}" loading="lazy" />
+      </div>
+      <div class="ship-body">
+        <h4 class="ship-name">${esc(pkg.shipName)}</h4>
+        <div class="ship-capital">Capital <b>${tzs(pkg.capital)}</b></div>
+        <div class="ship-profit">
+          <strong>${tzs(pkg.dailyProfit)}</strong>
+          <em>per business day</em>
+        </div>
+        ${compact ? '' : `<ul class="ship-perks">${pkg.perks.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>`}
+        <div class="tiny muted">${tzs(pkg.dailyProfit * pkg.days)} total over ${pkg.days} profit days</div>
+        <button class="btn btn-gold btn-sm" data-action="pick-ship" data-id="${esc(pkg.id)}" type="button">
+          Rent this ship
+        </button>
+      </div>
+    </article>`;
+}
+
+function viewPackage() {
+  const packages = (state.config && state.config.packages) || [];
+  return `
+    <section class="card card-hero">
+      <h2>Ship packages</h2>
+      <p>${packages.length} levels · rent with capital · profit credited 24 hours after renting.</p>
+    </section>
+    <div class="notice info">
+      <div><strong>How it works</strong> Choose a level, rent the ship with capital, and receive the daily profit every business day for ${packages[0] ? packages[0].days : 30} days. Saturday and Sunday pay nothing.</div>
+    </div>
+    <div class="grid-3">
+      ${packages.map((p) => shipCard(p)).join('')}
+    </div>`;
+}
+
+function viewInvest() {
+  const packages = (state.config && state.config.packages) || [];
+  const selected = packages.find((p) => p.id === state.investLevel) || packages[0] || null;
+  const list = state.investments;
+  return `
+    <section class="card card-hero">
+      <h2>Invest in a ship</h2>
+      <p>Capital ${tzs(state.user.capital)} available · profit starts 24 hours after renting.</p>
+    </section>
+
+    <div class="card">
+      <div class="section-title"><h3>Rent a ship</h3></div>
+      <form id="invest-form" class="form" novalidate>
+        <label class="field">
+          <span>Ship level</span>
+          <select name="packageId" id="invest-package" required>
+            ${packages
+              .map(
+                (p) =>
+                  `<option value="${esc(p.id)}" ${selected && p.id === selected.id ? 'selected' : ''}>${esc(p.name)} · ${esc(p.shipName)} · capital ${tzs(p.capital)}</option>`,
+              )
+              .join('')}
+          </select>
+        </label>
+        ${
+          selected
+            ? `<div class="grid-2">
+                <div class="stat gold"><em>Capital required</em><strong>${tzs(selected.capital)}</strong></div>
+                <div class="stat green"><em>Profit per business day</em><strong>${tzs(selected.dailyProfit)}</strong></div>
+              </div>
+              <img src="${esc(selected.image)}" alt="${esc(selected.shipName)}" style="width:100%;max-width:320px;margin:0 auto" />`
+            : ''
+        }
+        <button class="btn btn-primary" type="submit">Rent ship with capital</button>
+        <p class="form-note">The exact capital is taken from your capital balance. Profit balance cannot be used.</p>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>My ships</h3><span class="muted small">${list.length} total</span></div>
+      <div class="list">
+        ${
+          list.length
+            ? list
+                .map(
+                  (inv) => `
+          <div class="row">
+            <div class="row-ico">🚢</div>
+            <div class="row-main" style="flex:1">
+              <strong>${esc(inv.shipName)} · ${esc(inv.packageName)}</strong>
+              <span>${tzs(inv.dailyProfit)}/day · earned ${tzs(inv.earned)} of ${tzs(inv.projectedTotal)}</span>
+              <div class="progress ${inv.status === 'active' ? '' : 'gold'}" style="margin-top:6px">
+                <i style="width:${Math.min(100, inv.progress)}%"></i>
+              </div>
+              <span>${inv.daysPaid}/${inv.days} profit days${inv.status === 'active' && inv.nextPayoutAt ? ` · next ${fmtDate(inv.nextPayoutAt)}` : ''}</span>
+            </div>
+            <div class="row-amt"><strong>${tzs(inv.amount)}</strong><span class="badge ${inv.status === 'active' ? 'processing' : 'completed'}">${esc(inv.status === 'active' ? 'Sailing' : 'Finished')}</span></div>
+          </div>`,
+                )
+                .join('')
+            : '<p class="muted small">No ships yet. Rent one above and profit starts after 24 hours.</p>'
+        }
+      </div>
+    </div>`;
+}
+
+function viewInvite() {
+  const invite = state.invite || { code: state.user.referralCode, invited: [], totalInvited: 0, totalEarned: 0, bonusPercent: 10 };
+  const link = `${location.origin}/?ref=${encodeURIComponent(invite.code || '')}`;
+  return `
+    <section class="card card-hero">
+      <h2>Invite friends</h2>
+      <p>Earn ${esc(invite.bonusPercent || 10)}% of every invited member's first deposit — credited automatically.</p>
+    </section>
+
+    <div class="grid-3">
+      <div class="stat green"><em>Invited members</em><strong>${esc(invite.totalInvited)}</strong></div>
+      <div class="stat gold"><em>Bonus earned</em><strong>${tzs(invite.totalEarned)}</strong></div>
+      <div class="stat"><em>Bonus rate</em><strong>${esc(invite.bonusPercent || 10)}%</strong></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Your invite code</h3></div>
+      <div class="kv">
+        <div><span>Code</span><b>${esc(invite.code)}</b></div>
+        <div><span>Link</span><b style="word-break:break-all">${esc(link)}</b></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" data-action="copy-invite" data-link="${esc(link)}" type="button">Copy invite link</button>
+        <button class="btn btn-ghost btn-sm" data-action="share-invite" data-link="${esc(link)}" data-code="${esc(invite.code)}" type="button">Share</button>
+      </div>
+      <p class="small muted" style="margin:12px 0 0">Your friend enters the code when creating an account. When their first deposit is confirmed, ${esc(invite.bonusPercent || 10)}% lands in your profit balance.</p>
+    </div>
+
+    <div class="card">
+      <div class="section-title"><h3>Invited members</h3></div>
+      <div class="list">
+        ${
+          (invite.invited || []).length
+            ? invite.invited
+                .map(
+                  (m) => `
+          <div class="row">
+            <div class="row-ico">☺</div>
+            <div class="row-main"><strong>${esc(m.name)}</strong><span>Joined ${esc(fmtDate(m.joinedAt))}</span></div>
+            <div class="row-amt"><span class="badge ${m.rewarded ? 'completed' : 'pending'}">${m.rewarded ? 'Bonus paid' : 'Waiting deposit'}</span></div>
+          </div>`,
+                )
+                .join('')
+            : '<p class="muted small">No invited members yet. Share your link to start earning.</p>'
+        }
+      </div>
+    </div>`;
+}
+
+function viewHistory() {
+  const filters = [
+    ['all', 'All'],
+    ['deposit', 'Deposits'],
+    ['withdraw', 'Withdrawals'],
+    ['invest', 'Ship rentals'],
+    ['profit', 'Profit'],
+    ['invite_bonus', 'Referral bonus'],
+  ];
+  return `
+    <section class="card card-hero">
+      <h2>Transaction history</h2>
+      <p>Deposits, withdrawals, ship rentals, daily profit and bonuses.</p>
+    </section>
+    <div class="filters">
+      ${filters
+        .map(
+          ([id, label]) =>
+            `<button class="filter ${state.filter === id ? 'is-active' : ''}" data-filter="${id}" type="button">${label}</button>`,
+        )
+        .join('')}
+    </div>
+    <div class="card">
+      <div class="list">
+        ${
+          state.transactions.length
+            ? state.transactions.map(txnRow).join('')
+            : '<p class="muted small">No transactions for this filter.</p>'
+        }
+      </div>
+    </div>`;
+}
+
+function viewAccount() {
+  const u = state.user;
+  return `
+    <section class="card card-hero">
+      <h2>My account</h2>
+      <p>${esc(u.name)} · ${esc(u.email)}</p>
+    </section>
+    <div class="card">
+      <div class="section-title"><h3>Profile</h3></div>
+      <div class="kv">
+        <div><span>Name</span><b>${esc(u.name)}</b></div>
+        <div><span>Email</span><b>${esc(u.email)}</b></div>
+        <div><span>Phone</span><b>${esc(u.phone)}</b></div>
+        <div><span>Level</span><b>Level ${esc(u.vipLevel || 0)}</b></div>
+        <div><span>Invite code</span><b>${esc(u.referralCode)}</b></div>
+        <div><span>Joined</span><b>${esc(fmtDate(u.createdAt))}</b></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title"><h3>Change password</h3></div>
+      <form id="password-form" class="form" novalidate>
+        <label class="field"><span>Current password</span><input type="password" name="currentPassword" required /></label>
+        <label class="field"><span>New password</span><input type="password" name="newPassword" minlength="6" required /></label>
+        <button class="btn btn-primary" type="submit">Update password</button>
+      </form>
+    </div>
+    ${u.role === 'admin' ? '<button class="btn btn-gold" data-go="admin" type="button">Open admin panel</button>' : ''}
+    <button class="btn btn-ghost" data-action="logout" type="button">Sign out</button>`;
+}
+
+function viewAdmin() {
+  const data = state.admin;
+  if (!data) return '<div class="card"><p class="muted small">Loading admin data…</p></div>';
+  const stats = data.stats || {};
+  const requests = data.requests || [];
+  return `
+    <section class="card card-hero">
+      <h2>Admin panel</h2>
+      <p>Approve deposits and withdrawals, monitor payouts.</p>
+    </section>
+    <div class="grid-4">
+      <div class="stat"><em>Members</em><strong>${esc(stats.users || 0)}</strong></div>
+      <div class="stat gold"><em>Pending deposits</em><strong>${esc(stats.pendingDeposits || 0)}</strong></div>
+      <div class="stat gold"><em>Pending withdrawals</em><strong>${esc(stats.pendingWithdrawals || 0)}</strong></div>
+      <div class="stat green"><em>Total deposited</em><strong>${tzs(stats.totalDeposited || 0)}</strong></div>
+    </div>
+    <div class="card">
+      <div class="section-title"><h3>Pending requests</h3><span class="muted small">${requests.length}</span></div>
+      <div class="list">
+        ${
+          requests.length
+            ? requests
+                .map(
+                  (t) => `
+          <div class="row">
+            <div class="row-ico ${t.type === 'withdraw' ? 'out' : ''}">${t.type === 'withdraw' ? '↑' : '↓'}</div>
+            <div class="row-main" style="flex:1">
+              <strong>${esc(t.label)} · ${tzs(t.amount)}</strong>
+              <span>${esc(t.user ? `${t.user.name} · ${t.user.phone}` : 'Unknown')} · ${esc(t.method || '')} · ${esc(fmtDate(t.createdAt))}</span>
+              ${t.type === 'withdraw' ? `<span>Fee ${tzs(t.fee)} · pays out ${tzs(t.net)}</span>` : ''}
+            </div>
+            <div class="row-amt" style="display:flex;gap:6px">
+              <button class="btn btn-primary btn-sm" data-action="decide" data-id="${esc(t.id)}" data-decision="approve" type="button">Approve</button>
+              <button class="btn btn-ghost btn-sm" data-action="decide" data-id="${esc(t.id)}" data-decision="reject" type="button">Reject</button>
+            </div>
+          </div>`,
+                )
+                .join('')
+            : '<p class="muted small">No pending requests.</p>'
+        }
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title"><h3>Payouts in progress</h3></div>
+      <div class="list">
+        ${
+          (data.payouts || []).length
+            ? data.payouts
+                .map(
+                  (t) => `
+          <div class="row">
+            <div class="row-ico gold">↑</div>
+            <div class="row-main"><strong>${tzs(t.net)} to ${esc(t.user ? t.user.name : 'member')}</strong><span>${esc(t.method || '')} · ${esc(fmtDate(t.createdAt))}</span></div>
+            <div class="row-amt">${statusBadge(t)}</div>
+          </div>`,
+                )
+                .join('')
+            : '<p class="muted small">Nothing is being paid out right now.</p>'
+        }
+      </div>
+    </div>
+    <button class="btn btn-ghost" data-go="home" type="button">Back to dashboard</button>`;
+}
+
+/* ---------------- data loading ---------------- */
+
+async function loadView(view) {
+  if (view === 'history') {
+    const query = state.filter === 'all' ? '' : `?type=${encodeURIComponent(state.filter)}`;
+    const data = await api(`/api/transactions${query}`);
+    state.transactions = data.transactions || [];
+  }
+  if (view === 'invest' || view === 'package') {
+    const data = await api('/api/investments');
+    state.investments = data.investments || [];
+  }
+  if (view === 'invite') {
+    state.invite = await api('/api/invite');
+  }
+  if (view === 'admin') {
+    state.admin = await api('/api/admin/overview');
+  }
+}
+
+async function go(view) {
+  state.view = view;
+  const renderers = {
+    home: viewHome,
+    deposit: viewDeposit,
+    withdraw: viewWithdraw,
+    package: viewPackage,
+    invest: viewInvest,
+    invite: viewInvite,
+    history: viewHistory,
+    account: viewAccount,
+    admin: viewAdmin,
   };
+  try {
+    await loadView(view);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  const render = renderers[view] || viewHome;
+  $('#view').innerHTML = render();
+  renderChrome();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 
-  const $ = (sel, root) => (root || document).querySelector(sel);
-  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+/* ---------------- actions ---------------- */
 
-  function esc(value) {
-    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-    return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => map[c]);
+async function submitDeposit(form) {
+  const body = {};
+  new FormData(form).forEach((v, k) => {
+    body[k] = String(v).trim();
+  });
+  const button = $('button[type="submit"]', form);
+  button.disabled = true;
+  try {
+    const data = await api('/api/deposit', { method: 'POST', body });
+    state.pendingDeposit = data.transaction;
+    setUser(data.user);
+    toast(data.payment && data.payment.message ? data.payment.message : 'Deposit created');
+    await go('deposit');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function submitWithdraw(form) {
+  const body = {};
+  new FormData(form).forEach((v, k) => {
+    body[k] = String(v).trim();
+  });
+  const button = $('button[type="submit"]', form);
+  button.disabled = true;
+  try {
+    const data = await api('/api/withdraw', { method: 'POST', body });
+    setUser(data.user);
+    form.reset();
+    toast(`Withdrawal requested. You will receive ${tzs(data.payout.net)} after the 10% fee.`);
+    await go('history');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function submitInvest(form) {
+  const body = {};
+  new FormData(form).forEach((v, k) => {
+    body[k] = String(v).trim();
+  });
+  const pkg = ((state.config && state.config.packages) || []).find((p) => p.id === body.packageId);
+  if (pkg) body.amount = pkg.capital;
+  const button = $('button[type="submit"]', form);
+  button.disabled = true;
+  try {
+    const data = await api('/api/invest', { method: 'POST', body });
+    setUser(data.user);
+    toast(`${data.investment.shipName} rented. First profit in 24 hours.`);
+    await go('invest');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function simulateDeposit(id) {
+  try {
+    const data = await api(`/api/deposit/${id}/simulate`, { method: 'POST' });
+    setUser(data.user);
+    state.pendingDeposit = null;
+    toast('Deposit credited to your capital.');
+    await go('deposit');
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+async function decide(id, decision) {
+  try {
+    const data = await api(`/api/admin/transactions/${id}/decision`, {
+      method: 'POST',
+      body: { action: decision },
+    });
+    state.admin = null;
+    toast(`${data.transaction.label} ${decision === 'approve' ? 'approved' : 'rejected'}.`);
+    await go('admin');
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+/* ---------------- wiring ---------------- */
+
+document.addEventListener('click', async (event) => {
+  const tab = event.target.closest('[data-auth-tab]');
+  if (tab) return setAuthTab(tab.dataset.authTab);
+
+  const nav = event.target.closest('[data-go]');
+  if (nav) {
+    event.preventDefault();
+    return go(nav.dataset.go);
   }
 
-  function tzs(amount) {
-    return 'TZS ' + Number(amount || 0).toLocaleString('en-US');
+  const filter = event.target.closest('[data-filter]');
+  if (filter) {
+    state.filter = filter.dataset.filter;
+    return go('history');
   }
 
-  function fmtDate(iso) {
-    if (!iso) return '—';
+  const pick = event.target.closest('[data-action="pick-ship"]');
+  if (pick) {
+    state.investLevel = pick.dataset.id;
+    return go('invest');
+  }
+
+  const sim = event.target.closest('[data-action="simulate"]');
+  if (sim) return simulateDeposit(sim.dataset.id);
+
+  const decision = event.target.closest('[data-action="decide"]');
+  if (decision) return decide(decision.dataset.id, decision.dataset.decision);
+
+  const copy = event.target.closest('[data-action="copy-invite"]');
+  if (copy) {
     try {
-      return new Date(iso).toLocaleString('sw-TZ', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return String(iso);
+      await navigator.clipboard.writeText(copy.dataset.link);
+      toast('Invite link copied.');
+    } catch (err) {
+      toast(copy.dataset.link);
     }
+    return;
   }
 
-  let toastTimer = null;
-  function toast(message, kind) {
-    const box = $('#toast');
-    box.textContent = message;
-    box.className = 'toast is-visible' + (kind ? ` toast--${kind}` : '');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      box.className = 'toast';
-    }, 4200);
-  }
-
-  async function api(path, options) {
-    const opts = options || {};
-    const headers = {};
-    if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
-    if (opts.auth !== false) {
-      const token = localStorage.getItem(TOKEN_KEY);
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
-    let response;
-    try {
-      response = await fetch('/api' + path, {
-        method: opts.method || 'GET',
-        headers,
-        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-      });
-    } catch {
-      throw new Error('Hakuna muunganisho wa mtandao. Jaribu tena.');
-    }
-    let data = null;
-    try {
-      data = await response.json();
-    } catch {
-      data = null;
-    }
-    if (!response.ok) {
-      if (response.status === 401 && opts.auth !== false) {
-        clearSession();
-        showAuth();
+  const share = event.target.closest('[data-action="share-invite"]');
+  if (share) {
+    const text = `Join Ship Transfer with my code ${share.dataset.code} and earn profit from ships: ${share.dataset.link}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Ship Transfer', text, url: share.dataset.link });
+      } catch (err) {
+        /* dismissed */
       }
-      throw new Error((data && data.error) || 'Hitilafu imetokea. Jaribu tena.');
+    } else {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('Invite message copied.');
+      } catch (err) {
+        toast(share.dataset.link);
+      }
     }
-    return data || {};
+    return;
   }
 
-  function clearSession() {
-    localStorage.removeItem(TOKEN_KEY);
-    app.user = null;
-  }
+  const out = event.target.closest('[data-action="logout"]');
+  if (out) return logout();
+});
 
-  /* ---------------- Auth screen ---------------- */
-  function switchAuthTab(tab) {
-    $$('[data-auth-tab]').forEach((btn) => {
-      if (btn.classList.contains('auth-tab')) btn.classList.toggle('is-active', btn.dataset.authTab === tab);
+document.addEventListener('submit', async (event) => {
+  const form = event.target;
+  event.preventDefault();
+  if (form.id === 'login-form') return submitAuth(form, '/api/auth/login');
+  if (form.id === 'register-form') return submitAuth(form, '/api/auth/register');
+  if (form.id === 'deposit-form') return submitDeposit(form);
+  if (form.id === 'withdraw-form') return submitWithdraw(form);
+  if (form.id === 'invest-form') return submitInvest(form);
+  if (form.id === 'password-form') {
+    const body = {};
+    new FormData(form).forEach((v, k) => {
+      body[k] = String(v).trim();
     });
-    $$('[data-auth-pane]').forEach((pane) => {
-      pane.hidden = pane.dataset.authPane !== tab;
-    });
-  }
-
-  function showAuth() {
-    $('#app-screen').hidden = true;
-    $('#auth-screen').hidden = false;
-    window.scrollTo(0, 0);
-  }
-
-  function showApp() {
-    $('#auth-screen').hidden = true;
-    $('#app-screen').hidden = false;
-    renderShell();
-    switchView(app.view || 'dashboard');
-  }
-
-  async function handleLogin(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector('button[type=submit]');
-    button.disabled = true;
     try {
-      const data = await api('/auth/login', {
-        method: 'POST',
-        auth: false,
-        body: {
-          email: form.email.value.trim(),
-          password: form.password.value,
-        },
-      });
-      localStorage.setItem(TOKEN_KEY, data.token);
-      form.reset();
-      await loadAll();
-      app.view = 'dashboard';
-      showApp();
-      toast(`Karibu ${app.user.name.split(' ')[0]}!`, 'ok');
+      await api('/api/account/password', { method: 'POST', body });
+      toast('Password changed. Please sign in again.');
+      logout();
     } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      button.disabled = false;
+      toast(err.message, true);
     }
+    return undefined;
+  }
+  return undefined;
+});
+
+document.addEventListener('input', (event) => {
+  if (event.target.id === 'withdraw-amount') {
+    const amount = Number(event.target.value || 0);
+    const fee = Math.round(amount * 0.1);
+    const feeEl = $('#withdraw-fee');
+    const netEl = $('#withdraw-net');
+    if (feeEl) feeEl.textContent = tzs(fee);
+    if (netEl) netEl.textContent = tzs(Math.max(0, amount - fee));
+  }
+});
+
+document.addEventListener('change', (event) => {
+  if (event.target.id === 'invest-package') {
+    state.investLevel = event.target.value;
+    go('invest');
+  }
+});
+
+async function boot() {
+  const params = new URLSearchParams(location.search);
+  const ref = params.get('ref');
+  if (ref) {
+    const input = $('#register-invite');
+    if (input) input.value = ref.toUpperCase();
+    setAuthTab('register');
   }
 
-  async function handleRegister(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector('button[type=submit]');
-    button.disabled = true;
-    try {
-      const data = await api('/auth/register', {
-        method: 'POST',
-        auth: false,
-        body: {
-          name: form.name.value.trim(),
-          phone: form.phone.value.trim(),
-          email: form.email.value.trim(),
-          password: form.password.value,
-          inviteCode: form.inviteCode.value.trim(),
-        },
-      });
-      localStorage.setItem(TOKEN_KEY, data.token);
-      form.reset();
-      await loadAll();
-      app.view = 'dashboard';
-      showApp();
-      toast('Akaunti yako imefunguliwa. Karibu Ship Transfer!', 'ok');
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      button.disabled = false;
-    }
+  try {
+    state.config = await api('/api/config');
+  } catch (err) {
+    toast('Cannot reach the server. Please reload.', true);
   }
 
-  async function handleLogout() {
-    try {
-      await api('/auth/logout', { method: 'POST' });
-    } catch {
-      /* ignore */
-    }
-    clearSession();
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) {
     showAuth();
-    switchAuthTab('login');
-    toast('Umetoka kwenye akaunti.', 'ok');
+    return;
   }
-
-  /* ---------------- Data ---------------- */
-  async function loadAll() {
-    const [me, txns, investments, invite] = await Promise.all([
-      api('/me'),
-      api('/transactions'),
-      api('/investments'),
-      api('/invite'),
-    ]);
-    app.user = me.user;
-    app.packages = me.packages || app.packages;
-    app.txns = txns.transactions || [];
-    app.investments = investments.investments || [];
-    app.invite = invite;
-    renderAll();
+  state.token = token;
+  try {
+    await refreshMe();
+    const data = await api('/api/transactions');
+    state.transactions = data.transactions || [];
+    showApp();
+  } catch (err) {
+    localStorage.removeItem(TOKEN_KEY);
+    state.token = null;
+    showAuth();
   }
+}
 
-  async function refresh() {
-    try {
-      await loadAll();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  }
-
-  /* ---------------- Navigation ---------------- */
-  function switchView(view) {
-    app.view = view;
-    $$('.view').forEach((section) => section.classList.toggle('is-active', section.dataset.view === view));
-    $$('.side-nav .nav-item').forEach((btn) => btn.classList.toggle('is-active', btn.dataset.go === view));
-    $$('.bottom-nav .bn-item').forEach((btn) => btn.classList.toggle('is-active', btn.dataset.go === view));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    if (view === 'admin') loadAdmin();
-    if (view === 'withdraw') syncWithdrawAccount();
-    if (view === 'history') renderHistory();
-  }
-
-  /* ---------------- Rendering ---------------- */
-  function renderShell() {
-    if (!app.user) return;
-    const u = app.user;
-    const first = (u.name || '').split(' ')[0] || 'mteja';
-    $('#top-name').textContent = first;
-    $('#top-greeting').textContent = greeting();
-    $('#top-vip').textContent = `VIP ${u.vipLevel || 0}`;
-    $('#top-avatar').textContent = (u.name || 'S').trim().charAt(0).toUpperCase();
-    $('#side-balance').textContent = tzs(u.balance);
-    $$('.nav-item--admin').forEach((btn) => {
-      btn.hidden = u.role !== 'admin';
-    });
-    $('#withdraw-balance').textContent = tzs(u.balance);
-    $('#dash-vip').textContent = `VIP ${u.vipLevel || 0}`;
-  }
-
-  function greeting() {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Habari za asubuhi';
-    if (hour < 17) return 'Habari za mchana';
-    return 'Habari za jioni';
-  }
-
-  function renderAll() {
-    renderShell();
-    renderDashboard();
-    renderPackages();
-    renderHistory();
-    renderInvite();
-    renderAccount();
-    if (app.view === 'admin') loadAdmin();
-  }
-
-  function emptyRow(text) {
-    return `<p class="empty">${esc(text)}</p>`;
-  }
-
-  function txnRow(txn) {
-    const inflow = INFLOW.has(txn.type);
-    const sign = inflow ? '+' : '−';
-    const cls = inflow ? 'amount--in' : 'amount--out';
-    const status = STATUS_LABEL[txn.status] || txn.status;
-    const meta = [
-      txn.method,
-      txn.payoutStatus === 'failed' ? 'Utoaji umeshindikana' : null,
-      txn.reference ? `Ref: ${txn.reference}` : null,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-    return `
-      <div class="row">
-        <div class="row__main">
-          <strong>${esc(txn.label || txn.type)}</strong>
-          <span>${esc(fmtDate(txn.createdAt))}${meta ? ' · ' + esc(meta) : ''}</span>
-        </div>
-        <div class="row__side">
-          <strong class="${cls}">${sign} ${esc(tzs(txn.amount))}</strong>
-          <span class="status status--${esc(txn.status)}">${esc(status)}</span>
-        </div>
-      </div>`;
-  }
-
-  function renderDashboard() {
-    const u = app.user;
-    if (!u) return;
-    $('#dash-balance').textContent = tzs(u.balance);
-    $('#dash-profit').textContent = tzs(u.totalProfit);
-    $('#dash-active').textContent = String(u.activeInvestments);
-    $('#dash-pending').textContent = String(u.pendingCount);
-
-    const active = app.investments.filter((i) => i.status === 'active').slice(0, 3);
-    $('#dash-investments').innerHTML = active.length
-      ? active
-          .map(
-            (inv) => `
-        <div class="row">
-          <div class="row__main">
-            <strong>${esc(inv.packageName)} · ${esc(tzs(inv.amount))}</strong>
-            <span>${esc(tzs(inv.dailyProfit))}/siku · siku ${inv.daysPaid}/${inv.days}</span>
-            <div class="progress"><i style="width:${inv.progress}%"></i></div>
-          </div>
-          <div class="row__side">
-            <strong class="amount--in">${esc(tzs(inv.earned))}</strong>
-            <span class="status status--completed">Hai</span>
-          </div>
-        </div>`,
-          )
-          .join('')
-      : emptyRow('Bado huna uwekezaji hai. Chagua kifurushi cha VIP kuanza.');
-
-    const recent = app.txns.slice(0, 5);
-    $('#dash-txns').innerHTML = recent.length ? recent.map(txnRow).join('') : emptyRow('Hakuna muamala bado.');
-  }
-
-  function renderPackages() {
-    const grid = $('#packages-grid');
-    if (!app.packages || !app.packages.length) {
-      grid.innerHTML = emptyRow('Vifurushi vinapakiwa...');
-      return;
-    }
-    grid.innerHTML = app.packages
-      .map(
-        (pkg) => `
-      <article class="package${pkg.level === 5 ? ' package--top' : ''}">
-        <span class="package__tag">${esc(pkg.tag)}</span>
-        <h3 class="package__name">${esc(pkg.name)}</h3>
-        <div class="package__rate">${(pkg.dailyRate * 100).toFixed(1)}%<small> / siku</small></div>
-        <div class="package__meta">
-          <span>Kuanzia ${esc(tzs(pkg.min))}</span>
-          <span>Siku ${pkg.days}</span>
-        </div>
-        <ul>
-          ${pkg.perks.map((perk) => `<li>${esc(perk)}</li>`).join('')}
-          <li>Faida jumla: ${esc(tzs(pkg.totalProfitAtMin))} kwa ${esc(tzs(pkg.min))}</li>
-        </ul>
-        <button class="btn btn--primary btn--block" type="button" data-invest="${esc(pkg.id)}">Wekeza ${esc(pkg.name)}</button>
-      </article>`,
-      )
-      .join('');
-  }
-
-  function filteredTxns() {
-    if (app.filter === 'all') return app.txns;
-    if (app.filter === 'bonus') return app.txns.filter((t) => t.type === 'signup_bonus' || t.type === 'invite_bonus');
-    return app.txns.filter((t) => t.type === app.filter);
-  }
-
-  function renderHistory() {
-    const list = filteredTxns();
-    $('#history-list').innerHTML = list.length ? list.map(txnRow).join('') : emptyRow('Hakuna muamala wa aina hii.');
-    $$('#history-filters .chip-btn').forEach((btn) => btn.classList.toggle('is-active', btn.dataset.filter === app.filter));
-  }
-
-  function renderInvite() {
-    const invite = app.invite;
-    if (!invite) return;
-    $('#invite-code').textContent = invite.code;
-    const link = `${location.origin}/?ref=${encodeURIComponent(invite.code)}`;
-    $('#invite-link').value = link;
-    $('#invite-count').textContent = String(invite.totalInvited);
-    $('#invite-earned').textContent = tzs(invite.totalEarned);
-    $('#invite-list').innerHTML = invite.invited.length
-      ? invite.invited
-          .map(
-            (friend) => `
-        <div class="row">
-          <div class="row__main">
-            <strong>${esc(friend.name)}</strong>
-            <span>Alijiunga ${esc(fmtDate(friend.joinedAt))}</span>
-          </div>
-          <div class="row__side"><span class="chip chip--gold">VIP ${friend.vipLevel}</span></div>
-        </div>`,
-          )
-          .join('')
-      : emptyRow('Bado hujapata mwaliko. Shiriki kodi yako na rafiki.');
-  }
-
-  function renderAccount() {
-    const u = app.user;
-    if (!u) return;
-    $('#acc-name').textContent = u.name;
-    $('#acc-email').textContent = u.email;
-    $('#acc-phone').textContent = u.phone;
-    $('#acc-code').textContent = u.referralCode;
-    $('#acc-vip').textContent = `VIP ${u.vipLevel || 0}`;
-    $('#acc-since').textContent = fmtDate(u.createdAt);
-  }
-
-  /* ---------------- Actions ---------------- */
-  async function handleDeposit(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector('button[type=submit]');
-    button.disabled = true;
-    hideDepositWait();
-    try {
-      const data = await api('/deposit', {
-        method: 'POST',
-        body: {
-          amount: Number(form.amount.value),
-          method: form.method.value,
-          phone: form.phone ? form.phone.value.trim() : '',
-          reference: form.reference ? form.reference.value.trim() : '',
-        },
-      });
-      app.user = data.user;
-      await refresh();
-      const payment = data.payment || {};
-      if (payment.status === 'manual') {
-        form.reset();
-        updateDepositMethod();
-        toast('Ombi la amana limewasilishwa. Linasubiri uthibitisho wa msimamizi.', 'ok');
-        switchView('history');
-        return;
-      }
-      app.pendingDepositId = data.transaction.id;
-      form.amount.value = '';
-      showDepositWait(payment);
-      startDepositPolling();
-      toast('Ombi la malipo limetumwa kwenye simu yako.', 'ok');
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      button.disabled = false;
-    }
-  }
-
-  async function handleWithdraw(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector('button[type=submit]');
-    button.disabled = true;
-    try {
-      const data = await api('/withdraw', {
-        method: 'POST',
-        body: {
-          amount: Number(form.amount.value),
-          method: form.method.value,
-          account: form.account.value.trim(),
-        },
-      });
-      form.reset();
-      app.user = data.user;
-      await refresh();
-      const note = data.payout && data.payout.automatic
-        ? 'Ombi limewasilishwa. Msimamizi akikubali, pesa itatumwa moja kwa moja kwenye simu yako.'
-        : 'Ombi la utoaji limewasilishwa. Kiasi kimekatiwa kwenye salio.';
-      toast(note, 'ok');
-      switchView('history');
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      button.disabled = false;
-    }
-  }
-
-  function openInvestDialog(packageId) {
-    const pkg = (app.packages || []).find((p) => p.id === packageId);
-    if (!pkg) return;
-    const dialog = $('#dialog');
-    $('#dialog-title').textContent = `Wekeza ${pkg.name}`;
-    $('#dialog-body').innerHTML = `
-      <p class="muted">Faida ${(pkg.dailyRate * 100).toFixed(1)}% kwa siku kwa siku ${pkg.days}. Kiasi cha chini ${esc(tzs(pkg.min))}.</p>
-      <label class="field">
-        <span>Kiasi cha kuwekeza (TZS)</span>
-        <input type="number" id="invest-amount" min="${pkg.min}" max="${pkg.max}" step="1000" value="${pkg.min}" />
-      </label>
-      <div class="pay-box">
-        <div class="pay-row"><span>Faida kwa siku</span><strong id="invest-daily">${esc(tzs(Math.round(pkg.min * pkg.dailyRate)))}</strong></div>
-        <div class="pay-row"><span>Faida jumla (siku ${pkg.days})</span><strong id="invest-total">${esc(tzs(Math.round(pkg.min * pkg.dailyRate) * pkg.days))}</strong></div>
-        <div class="pay-row"><span>Salio lako</span><strong>${esc(tzs(app.user ? app.user.balance : 0))}</strong></div>
-      </div>`;
-
-    const input = $('#invest-amount');
-    input.addEventListener('input', () => {
-      const amount = Number(input.value) || 0;
-      const daily = Math.round(amount * pkg.dailyRate);
-      $('#invest-daily').textContent = tzs(daily);
-      $('#invest-total').textContent = tzs(daily * pkg.days);
-    });
-
-    app.dialogSubmit = async () => {
-      const amount = Number(input.value);
-      const data = await api('/invest', { method: 'POST', body: { packageId: pkg.id, amount } });
-      app.user = data.user;
-      await refresh();
-      toast(`Uwekezaji ${pkg.name} umeanza. Faida inaingia kila siku.`, 'ok');
-      switchView('dashboard');
-    };
-    dialog.showModal();
-  }
-
-  async function loadAdmin() {
-    if (!app.user || app.user.role !== 'admin') return;
-    try {
-      const data = await api('/admin/overview');
-      app.admin = data;
-      renderAdmin();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  }
-
-  function renderAdmin() {
-    const data = app.admin;
-    if (!data) return;
-    const s = data.stats;
-    $('#admin-stats').innerHTML = `
-      <div class="stat"><span>Watumiaji</span><strong>${s.users}</strong></div>
-      <div class="stat"><span>Amana zinazosubiri</span><strong>${s.pendingDeposits}</strong></div>
-      <div class="stat"><span>Utoaji unaosubiri</span><strong>${s.pendingWithdrawals}</strong></div>
-      <div class="stat"><span>Yanayotolewa sasa</span><strong>${s.processingWithdrawals || 0}</strong></div>
-      <div class="stat"><span>Amana jumla</span><strong>${esc(tzs(s.totalDeposited))}</strong></div>
-      <div class="stat"><span>Uwekezaji jumla</span><strong>${esc(tzs(s.totalInvested))}</strong></div>`;
-
-    $('#admin-requests').innerHTML = data.requests.length
-      ? data.requests
-          .map(
-            (req) => `
-        <div class="row">
-          <div class="row__main">
-            <strong>${esc(req.label)} · ${esc(tzs(req.amount))} ${req.method ? '· ' + esc(req.method) : ''}</strong>
-            <span>${esc(req.user ? req.user.name : '—')} · ${esc(req.user ? req.user.phone : '')} · ${esc(fmtDate(req.createdAt))}</span>
-            ${req.reference ? `<span>Ref: ${esc(req.reference)}</span>` : ''}
-            ${req.payoutStatus === 'failed' ? `<span class="status status--rejected">Utoaji umeshindikana: ${esc(req.failureReason || 'jaribu tena')}</span>` : ''}
-            ${req.providerRef ? `<span>Kumbukumbu ya malipo: ${esc(req.providerRef)}</span>` : ''}
-          </div>
-          <div class="admin-actions">
-            <button class="btn btn--primary btn--sm" type="button" data-decide="approve" data-id="${esc(req.id)}">Kubali</button>
-            <button class="btn btn--danger btn--sm" type="button" data-decide="reject" data-id="${esc(req.id)}">Kataa</button>
-          </div>
-        </div>`,
-          )
-          .join('')
-      : emptyRow('Hakuna maombi yanayosubiri.');
-
-    const payouts = data.payouts || [];
-    if (payouts.length) {
-      $('#admin-requests').innerHTML +=
-        `<div class="row"><div class="row__main"><strong>Yanayotolewa sasa</strong><span>Malipo yaliyotumwa kwa mtoa huduma</span></div></div>` +
-        payouts
-          .map(
-            (p) => `
-        <div class="row">
-          <div class="row__main">
-            <strong>${esc(p.label)} · ${esc(tzs(p.amount))} · ${esc(p.method)}</strong>
-            <span>${esc(p.user ? p.user.name : '—')} · ${esc(p.phone || '')} · ${esc(fmtDate(p.createdAt))}</span>
-            ${p.providerRef ? `<span>Kumbukumbu: ${esc(p.providerRef)}</span>` : ''}
-          </div>
-          <div class="row__side"><span class="status status--processing">${esc(STATUS_LABEL.processing)}</span></div>
-        </div>`,
-          )
-          .join('');
-    }
-
-    $('#admin-users').innerHTML = data.recentUsers.length
-      ? data.recentUsers
-          .map(
-            (u) => `
-        <div class="row">
-          <div class="row__main">
-            <strong>${esc(u.name)}</strong>
-            <span>${esc(u.email)} · ${esc(u.phone)}</span>
-          </div>
-          <div class="row__side">
-            <strong>${esc(tzs(u.balance))}</strong>
-            <span class="chip chip--gold">VIP ${u.vipLevel}</span>
-          </div>
-        </div>`,
-          )
-          .join('')
-      : emptyRow('Hakuna watumiaji bado.');
-  }
-
-  async function decideRequest(id, action) {
-    try {
-      await api(`/admin/transactions/${encodeURIComponent(id)}/decision`, { method: 'POST', body: { action } });
-      toast(action === 'approve' ? 'Ombi limekubaliwa.' : 'Ombi limekataliwa.', 'ok');
-      await refresh();
-      await loadAdmin();
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  }
-
-  async function handlePasswordChange(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const button = form.querySelector('button[type=submit]');
-    button.disabled = true;
-    try {
-      await api('/account/password', {
-        method: 'POST',
-        body: {
-          currentPassword: form.currentPassword.value,
-          newPassword: form.newPassword.value,
-        },
-      });
-      form.reset();
-      clearSession();
-      showAuth();
-      switchAuthTab('login');
-      toast('Neno la siri limebadilishwa. Ingia tena.', 'ok');
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      button.disabled = false;
-    }
-  }
-
-  /* ---------------- Forms and events ---------------- */
-  function fillMethodSelects() {
-    const config = app.config;
-    if (!config) return;
-    const withdrawSelect = $('#withdraw-method');
-    withdrawSelect.innerHTML = config.withdrawMethods
-      .map((m) => `<option value="${esc(m)}">${esc(m)}</option>`)
-      .join('');
-    withdrawSelect.addEventListener('change', syncWithdrawAccount);
-    renderPayMethods();
-  }
-
-  function syncWithdrawAccount() {
-    const select = $('#withdraw-method');
-    const form = $('#withdraw-form');
-    if (!select || !form || !app.user) return;
-    const mobile = isMobileMethod(select.value);
-    if (mobile && !form.account.value) form.account.value = app.user.phone || '';
-    const hint = $('#withdraw-hint');
-    if (hint) {
-      hint.textContent = mobile
-        ? `Pesa itatumwa moja kwa moja kwenye ${select.value} baada ya msimamizi kukubali.`
-        : 'Pesa hutumwa kwenye akaunti yako ya benki baada ya msimamizi kukubali.';
-    }
-  }
-
-  /* ---------------- Malipo ya simu (M-Pesa / Tigo Pesa) ---------------- */
-  function paymentInfo() {
-    return (app.config && app.config.payments) || { mode: 'sandbox', mobileMethods: [] };
-  }
-
-  function isMobileMethod(method) {
-    return (paymentInfo().mobileMethods || []).includes(method);
-  }
-
-  function renderPayMethods() {
-    const wrap = $('#pay-methods');
-    if (!wrap) return;
-    const methods = (app.config && app.config.depositMethods) || [];
-    wrap.innerHTML = methods
-      .map((m) => {
-        const mobile = isMobileMethod(m.id);
-        return `<button type="button" class="pay-method" role="radio" aria-checked="false" data-pay-method="${esc(m.id)}">
-          <span class="pay-method__name">${esc(m.label)}</span>
-          <span class="pay-method__hint">${mobile ? 'Malipo ya simu' : 'Benki'}</span>
-        </button>`;
-      })
-      .join('');
-    updateDepositMethod();
-  }
-
-  function updateDepositMethod() {
-    const input = $('#deposit-method');
-    if (!input) return;
-    const method = input.value;
-    const mobile = isMobileMethod(method);
-    document.querySelectorAll('[data-pay-method]').forEach((btn) => {
-      const active = btn.dataset.payMethod === method;
-      btn.classList.toggle('is-active', active);
-      btn.setAttribute('aria-checked', active ? 'true' : 'false');
-    });
-    const phoneField = $('#deposit-phone-field');
-    const refField = $('#deposit-reference-field');
-    const bankBox = $('#deposit-bank-box');
-    if (phoneField) phoneField.hidden = !mobile;
-    if (refField) refField.hidden = mobile;
-    if (bankBox) bankBox.hidden = mobile;
-    const info = ((app.config && app.config.depositMethods) || []).find((m) => m.id === method);
-    const account = $('#deposit-account');
-    if (info && account && !mobile) account.textContent = info.account;
-    const submit = $('#deposit-submit');
-    if (submit) submit.textContent = mobile ? `Lipa kwa ${info ? info.label : method}` : 'Tuma ombi la amana';
-    renderPayBanner();
-  }
-
-  function renderPayBanner() {
-    const banner = $('#pay-mode-banner');
-    const note = $('#deposit-live-note');
-    if (!banner) return;
-    if (paymentInfo().mode === 'live') {
-      banner.hidden = true;
-      banner.innerHTML = '';
-      if (note) note.textContent = 'Malipo halisi yamewashwa — fedha zinaingia moja kwa moja kwenye akaunti ya kampuni.';
-      return;
-    }
-    banner.hidden = false;
-    banner.innerHTML =
-      '<strong>Hali ya majaribio.</strong> Hakuna pesa halisi inayotolewa. Weka <code>FLW_SECRET_KEY</code> na <code>FLW_WEBHOOK_HASH</code> kwenye Settings → Environment variables kuwezesha M-Pesa na Tigo Pesa halisi.';
-    if (note) note.textContent = 'Malipo halisi bado hayajawashwa — tumia kitufe cha majaribio kukamilisha amana.';
-  }
-
-  function showDepositWait(payment) {
-    const box = $('#deposit-wait');
-    if (!box) return;
-    box.hidden = false;
-    $('#deposit-wait-title').textContent = 'Angalia simu yako…';
-    $('#deposit-wait-text').textContent =
-      payment.message || 'Tumekutumia ombi la malipo. Weka PIN yako kukamilisha.';
-    const sim = $('#deposit-simulate');
-    if (sim) sim.hidden = paymentInfo().mode === 'live';
-  }
-
-  function hideDepositWait() {
-    stopDepositPolling();
-    const box = $('#deposit-wait');
-    if (box) box.hidden = true;
-    const sim = $('#deposit-simulate');
-    if (sim) sim.hidden = true;
-  }
-
-  function stopDepositPolling() {
-    if (app.depositPoll) {
-      clearInterval(app.depositPoll);
-      app.depositPoll = null;
-    }
-  }
-
-  function startDepositPolling() {
-    stopDepositPolling();
-    let tries = 0;
-    app.depositPoll = setInterval(async () => {
-      tries += 1;
-      if (tries > 45) {
-        stopDepositPolling();
-        $('#deposit-wait-text').textContent = 'Bado hatujapokea uthibitisho. Angalia historia baadaye.';
-        return;
-      }
-      try {
-        const data = await api(`/deposit/${app.pendingDepositId}`);
-        app.user = data.user;
-        if (data.transaction.status === 'completed') {
-          hideDepositWait();
-          await refresh();
-          toast(`Amana ya ${tzs(data.transaction.amount)} imeingia kwenye salio lako.`, 'ok');
-          switchView('history');
-        } else if (data.transaction.status === 'failed') {
-          hideDepositWait();
-          await refresh();
-          toast(data.transaction.failureReason || 'Malipo hayakufanikiwa. Jaribu tena.', 'error');
-        }
-      } catch (err) {
-        stopDepositPolling();
-        toast(err.message, 'error');
-      }
-    }, 4000);
-  }
-
-  async function simulateDeposit() {
-    if (!app.pendingDepositId) return;
-    const btn = $('#deposit-simulate');
-    if (btn) btn.disabled = true;
-    try {
-      const data = await api(`/deposit/${app.pendingDepositId}/simulate`, { method: 'POST' });
-      app.user = data.user;
-      hideDepositWait();
-      await refresh();
-      toast(`Amana ya majaribio ya ${tzs(data.transaction.amount)} imeingia kwenye salio.`, 'ok');
-      switchView('history');
-    } catch (err) {
-      toast(err.message, 'error');
-    } finally {
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  function bindEvents() {
-    document.addEventListener('click', async (event) => {
-      const authTab = event.target.closest('[data-auth-tab]');
-      if (authTab) {
-        switchAuthTab(authTab.dataset.authTab);
-        return;
-      }
-
-      const payMethod = event.target.closest('[data-pay-method]');
-      if (payMethod) {
-        const input = $('#deposit-method');
-        if (input) input.value = payMethod.dataset.payMethod;
-        updateDepositMethod();
-        return;
-      }
-
-      if (event.target.closest('#deposit-simulate')) {
-        await simulateDeposit();
-        return;
-      }
-      const go = event.target.closest('[data-go]');
-      if (go) {
-        switchView(go.dataset.go);
-        return;
-      }
-      const amountBtn = event.target.closest('[data-amount]');
-      if (amountBtn) {
-        const chips = amountBtn.closest('.amount-chips');
-        const form = document.getElementById(chips.dataset.target);
-        if (form && form[chips.dataset.field]) form[chips.dataset.field].value = amountBtn.dataset.amount;
-        return;
-      }
-      const filter = event.target.closest('[data-filter]');
-      if (filter) {
-        app.filter = filter.dataset.filter;
-        renderHistory();
-        return;
-      }
-      const investBtn = event.target.closest('[data-invest]');
-      if (investBtn) {
-        openInvestDialog(investBtn.dataset.invest);
-        return;
-      }
-      const decide = event.target.closest('[data-decide]');
-      if (decide) {
-        decide.disabled = true;
-        await decideRequest(decide.dataset.id, decide.dataset.decide);
-        decide.disabled = false;
-        return;
-      }
-      const action = event.target.closest('[data-action]');
-      if (!action) return;
-      if (action.dataset.action === 'logout') await handleLogout();
-      if (action.dataset.action === 'copy-invite') {
-        const value = $('#invite-link').value;
-        try {
-          await navigator.clipboard.writeText(value);
-          toast('Kiungo kimenakiliwa. Shiriki na rafiki!', 'ok');
-        } catch {
-          $('#invite-link').select();
-          toast('Bonyeza Ctrl+C kunakili kiungo.', 'error');
-        }
-      }
-      if (action.dataset.action === 'dialog-cancel') $('#dialog').close();
-    });
-
-    $('#login-form').addEventListener('submit', handleLogin);
-    $('#register-form').addEventListener('submit', handleRegister);
-    $('#deposit-form').addEventListener('submit', handleDeposit);
-    $('#withdraw-form').addEventListener('submit', handleWithdraw);
-    $('#password-form').addEventListener('submit', handlePasswordChange);
-
-    $('#dialog-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      if (!app.dialogSubmit) {
-        $('#dialog').close();
-        return;
-      }
-      const button = $('#dialog-confirm');
-      button.disabled = true;
-      try {
-        await app.dialogSubmit();
-        $('#dialog').close();
-      } catch (err) {
-        toast(err.message, 'error');
-      } finally {
-        button.disabled = false;
-        app.dialogSubmit = null;
-      }
-    });
-  }
-
-  async function boot() {
-    bindEvents();
-    try {
-      app.config = await api('/config', { auth: false });
-      app.packages = app.config.packages || [];
-      fillMethodSelects();
-    } catch {
-      /* config itajaribiwa tena baada ya kuingia */
-    }
-
-    const params = new URLSearchParams(location.search);
-    const ref = params.get('ref');
-    if (ref) {
-      switchAuthTab('register');
-      const input = $('#register-form [name=inviteCode]');
-      if (input) input.value = ref.trim().toUpperCase();
-    }
-
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) {
-      showAuth();
-      return;
-    }
-    try {
-      await loadAll();
-      showApp();
-    } catch {
-      clearSession();
-      showAuth();
-    }
-  }
-
-  document.addEventListener('DOMContentLoaded', boot);
-})();
+boot();
