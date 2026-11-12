@@ -131,7 +131,7 @@ async function submitAuth(form, path) {
     sessionUser(data);
     form.reset();
     showApp();
-    toast(`Welcome, ${state.user.name.split(' ')[0]}!`);
+    toast(`Welcome, ${state.user.phone}!`);
   } catch (err) {
     toast(err.message, true);
   } finally {
@@ -590,13 +590,11 @@ function viewAccount() {
   return `
     <section class="card card-hero">
       <h2>My account</h2>
-      <p>${esc(u.name)} · ${esc(u.email)}</p>
+      <p>${esc(u.phone)}</p>
     </section>
     <div class="card">
       <div class="section-title"><h3>Profile</h3></div>
       <div class="kv">
-        <div><span>Name</span><b>${esc(u.name)}</b></div>
-        <div><span>Email</span><b>${esc(u.email)}</b></div>
         <div><span>Phone</span><b>${esc(u.phone)}</b></div>
         <div><span>Level</span><b>Level ${esc(u.vipLevel || 0)}</b></div>
         <div><span>Invite code</span><b>${esc(u.referralCode)}</b></div>
