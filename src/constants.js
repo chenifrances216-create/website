@@ -1,90 +1,145 @@
 'use strict';
 
-// Bei na kanuni za mfumo (TZS)
+// Business rules (all amounts in TZS unless stated otherwise)
 const MIN_DEPOSIT = 5000;
-const MIN_WITHDRAW = 10000;
+const MIN_WITHDRAW = 3000;
 const MAX_AMOUNT = 50000000;
 const SIGNUP_BONUS = 1000;
-const INVITE_BONUS_INVITER = 2000;
-const INVITE_BONUS_INVITEE = 500;
-const DAY_MS = 24 * 60 * 60 * 1000;
-const SESSION_DAYS = 7;
 
-const PACKAGES = [
-  {
-    id: 'vip1',
-    name: 'VIP 1',
-    level: 1,
-    min: 10000,
-    max: 49999,
-    dailyRate: 0.015,
-    days: 30,
-    tag: 'Anza hapa',
-    perks: ['Faida ya 1.5% kwa siku', 'Muda wa siku 30', 'Malipo kila siku'],
-  },
-  {
-    id: 'vip2',
-    name: 'VIP 2',
-    level: 2,
-    min: 50000,
-    max: 199999,
-    dailyRate: 0.02,
-    days: 30,
-    tag: 'Maarufu',
-    perks: ['Faida ya 2.0% kwa siku', 'Muda wa siku 30', 'Msaada wa kipaumbele'],
-  },
-  {
-    id: 'vip3',
-    name: 'VIP 3',
-    level: 3,
-    min: 200000,
-    max: 499999,
-    dailyRate: 0.025,
-    days: 30,
-    tag: 'Imara',
-    perks: ['Faida ya 2.5% kwa siku', 'Muda wa siku 30', 'Ripoti ya kila wiki'],
-  },
-  {
-    id: 'vip4',
-    name: 'VIP 4',
-    level: 4,
-    min: 500000,
-    max: 999999,
-    dailyRate: 0.03,
-    days: 30,
-    tag: 'Premium',
-    perks: ['Faida ya 3.0% kwa siku', 'Muda wa siku 30', 'Meneja wa akaunti'],
-  },
-  {
-    id: 'vip5',
-    name: 'VIP 5',
-    level: 5,
-    min: 1000000,
-    max: 50000000,
-    dailyRate: 0.035,
-    days: 30,
-    tag: 'Elite',
-    perks: ['Faida ya 3.5% kwa siku', 'Muda wa siku 30', 'Utoaji wa haraka'],
-  },
+// Withdrawals: Monday-Friday, 10:00-17:00 East Africa Time (UTC+3)
+const TZ_OFFSET_MINUTES = 180;
+const TZ_LABEL = 'EAT (UTC+3)';
+const WITHDRAW_OPEN_MINUTE = 10 * 60; // 10:00
+const WITHDRAW_CLOSE_MINUTE = 17 * 60; // 17:00
+const WITHDRAW_FEE_RATE = 0.1; // 10% fee on every withdrawal
+const WITHDRAW_DAYS = [1, 2, 3, 4, 5]; // Mon-Fri
+
+// Profit rules: first payout 24h after renting a ship, business days only
+const PROFIT_DELAY_HOURS = 24;
+const PROFIT_WEEKEND_PAUSE = true;
+
+// Referral: 10% of the invited member's first deposit, credited automatically
+const REFERRAL_RATE = 0.1;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const SESSION_DAYS = 7;
+const INVEST_DAYS = 30;
+
+// Level table: capital -> profit per business day
+const LEVELS = [
+  [10000, 500],
+  [20000, 1000],
+  [30000, 1500],
+  [60000, 2000],
+  [100000, 3000],
+  [200000, 5000],
+  [300000, 7000],
+  [400000, 8000],
+  [600000, 15000],
+  [700000, 20000],
+  [800000, 25000],
+  [900000, 30000],
+  [1000000, 37000],
 ];
+
+const SHIP_NAMES = [
+  'MV Bahari Star',
+  'MV Coral Runner',
+  'MV Tembo Express',
+  'MV Zanzibar Trader',
+  'MV Kilimanjaro Cargo',
+  'MV Indian Ocean King',
+  'MV Tanga Voyager',
+  'MV Pemba Horizon',
+  'MV Dar Container',
+  'MV Serengeti Bulk',
+  'MV Mafia Tanker',
+  'MV Nautilus Prime',
+  'MV Golden Fleet',
+];
+
+const SHIP_TAGS = [
+  'Starter',
+  'Rising',
+  'Popular',
+  'Steady',
+  'Trusted',
+  'Ocean class',
+  'Voyager',
+  'Horizon',
+  'Container',
+  'Bulk',
+  'Tanker',
+  'Premium',
+  'Flagship',
+];
+
+function tzs(amount) {
+  return Number(amount || 0).toLocaleString('en-US');
+}
+
+const PACKAGES = LEVELS.map(([capital, dailyProfit], index) => {
+  const level = index + 1;
+  return {
+    id: `ship${level}`,
+    name: `Level ${level}`,
+    level,
+    shipName: SHIP_NAMES[index],
+    image: `/img/ships/level-${level}.svg`,
+    min: capital,
+    max: capital,
+    capital,
+    dailyProfit,
+    dailyRate: Number((dailyProfit / capital).toFixed(4)),
+    days: INVEST_DAYS,
+    tag: SHIP_TAGS[index] || null,
+    perks: [
+      `TZS ${tzs(dailyProfit)} profit every business day`,
+      `TZS ${tzs(capital)} capital locked for the rental`,
+      `First payout 24h after renting · ${INVEST_DAYS} profit days`,
+    ],
+  };
+});
 
 const DEPOSIT_METHODS = [
   { id: 'M-Pesa', label: 'M-Pesa', account: '150 456 789', holder: 'SHIP TRANSFER LTD' },
   { id: 'Tigo Pesa', label: 'Mixx by Yas (Tigo Pesa)', account: '150 456 790', holder: 'SHIP TRANSFER LTD' },
   { id: 'Airtel Money', label: 'Airtel Money', account: '150 456 791', holder: 'SHIP TRANSFER LTD' },
   { id: 'Halopesa', label: 'HaloPesa', account: '150 456 792', holder: 'SHIP TRANSFER LTD' },
-  { id: 'Benki', label: 'Benki (CRDB / NMB)', account: '0150 4567 8900', holder: 'SHIP TRANSFER LTD' },
+  { id: 'Benki', label: 'Bank transfer (CRDB / NMB)', account: '0150 4567 8900', holder: 'SHIP TRANSFER LTD' },
 ];
 
-const WITHDRAW_METHODS = ['M-Pesa', 'Tigo Pesa', 'Airtel Money', 'Halopesa', 'Benki'];
+const WITHDRAW_OPTIONS = [
+  { id: 'M-Pesa', label: 'M-Pesa' },
+  { id: 'Tigo Pesa', label: 'Mixx by Yas (Tigo Pesa)' },
+  { id: 'Airtel Money', label: 'Airtel Money' },
+  { id: 'Halopesa', label: 'HaloPesa' },
+  { id: 'Benki', label: 'Bank transfer (CRDB / NMB)' },
+];
+
+const WITHDRAW_METHODS = WITHDRAW_OPTIONS.map((m) => m.id);
 
 const TXN_LABELS = {
-  deposit: 'Amana',
-  withdraw: 'Utoaji',
-  invest: 'Uwekezaji',
-  profit: 'Faida',
-  signup_bonus: 'Bonasi ya usajili',
-  invite_bonus: 'Bonasi ya mwaliko',
+  deposit: 'Deposit',
+  withdraw: 'Withdrawal',
+  invest: 'Ship rental',
+  profit: 'Daily profit',
+  signup_bonus: 'Welcome bonus',
+  invite_bonus: 'Referral bonus',
+};
+
+const RULES = {
+  minWithdraw: MIN_WITHDRAW,
+  withdrawFeeRate: WITHDRAW_FEE_RATE,
+  withdrawDays: 'Monday - Friday',
+  withdrawOpen: '10:00',
+  withdrawClose: '17:00',
+  timezone: TZ_LABEL,
+  profitDelayHours: PROFIT_DELAY_HOURS,
+  profitWeekends: false,
+  referralRate: REFERRAL_RATE,
+  capitalWithdrawable: false,
 };
 
 module.exports = {
@@ -92,12 +147,24 @@ module.exports = {
   MIN_WITHDRAW,
   MAX_AMOUNT,
   SIGNUP_BONUS,
-  INVITE_BONUS_INVITER,
-  INVITE_BONUS_INVITEE,
+  TZ_OFFSET_MINUTES,
+  TZ_LABEL,
+  WITHDRAW_OPEN_MINUTE,
+  WITHDRAW_CLOSE_MINUTE,
+  WITHDRAW_FEE_RATE,
+  WITHDRAW_DAYS,
+  PROFIT_DELAY_HOURS,
+  PROFIT_WEEKEND_PAUSE,
+  REFERRAL_RATE,
   DAY_MS,
+  HOUR_MS,
   SESSION_DAYS,
+  INVEST_DAYS,
+  LEVELS,
   PACKAGES,
   DEPOSIT_METHODS,
+  WITHDRAW_OPTIONS,
   WITHDRAW_METHODS,
   TXN_LABELS,
+  RULES,
 };
