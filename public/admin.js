@@ -664,6 +664,16 @@ $('#tabs').addEventListener('click', (event) => {
   });
 });
 
+$('#quick-number').addEventListener('click', () => {
+  const tab = $('[data-tab="numbers"]');
+  if (tab) tab.click();
+  const form = $('#number-form');
+  if (!form) return;
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const first = form.querySelector('input[name="method"]');
+  if (first) first.focus();
+});
+
 $('#segments').addEventListener('click', (event) => {
   const chip = event.target.closest('[data-segment]');
   if (!chip) return;

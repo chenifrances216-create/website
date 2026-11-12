@@ -321,6 +321,18 @@ function viewDeposit() {
       <p>Deposits become locked capital. Use capital to rent a ship and start earning profit.</p>
     </section>
 
+    <div class="card" id="deposit-numbers-card">
+      <div class="section-title"><h3>Deposit numbers</h3><span class="muted small">Send to any number below</span></div>
+      ${numbers.length
+        ? `<div class="kv">${numbers
+            .map((n) => `<div><span>${esc(n.method)} · ${esc(n.name)}</span><b>${esc(n.number)}</b></div>`)
+            .join('')}</div>`
+        : '<p class="small muted">No deposit numbers have been published yet. Contact support before sending money.</p>'}
+      ${numbers.some((n) => n.note)
+        ? `<p class="small muted" style="margin:12px 0 0">${numbers.filter((n) => n.note).map((n) => esc(n.note)).join(' · ')}</p>`
+        : ''}
+    </div>
+
     <div class="card">
       <div class="section-title"><h3>New deposit</h3><span class="muted small">Minimum ${tzs(cfg.minDeposit || 5000)}</span></div>
       <form id="deposit-form" class="form" novalidate>
@@ -342,18 +354,6 @@ function viewDeposit() {
     </div>
 
     ${pendingCard}
-
-    <div class="card">
-      <div class="section-title"><h3>Deposit numbers</h3><span class="muted small">Send to any number below</span></div>
-      ${numbers.length
-        ? `<div class="kv">${numbers
-            .map((n) => `<div><span>${esc(n.method)} · ${esc(n.name)}</span><b>${esc(n.number)}</b></div>`)
-            .join('')}</div>`
-        : '<p class="small muted">No deposit numbers have been published yet. Contact support before sending money.</p>'}
-      ${numbers.some((n) => n.note)
-        ? `<p class="small muted" style="margin:12px 0 0">${numbers.filter((n) => n.note).map((n) => esc(n.note)).join(' · ')}</p>`
-        : ''}
-    </div>
 
     <div class="card">
       <div class="section-title"><h3>Company accounts</h3></div>
