@@ -180,17 +180,21 @@ function memberRow(state, user) {
   };
 }
 
-function members(state) {
+function members(state, segment) {
   let changed = false;
   for (const user of state.users) {
     if (user.role === 'admin') continue;
     if (domain.accrue(state, user)) changed = true;
   }
   if (changed) db.commit();
-  return state.users
+  const rows = state.users
     .filter((u) => u.role !== 'admin')
     .map((u) => memberRow(state, u))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const wanted = String(segment || 'all');
+  if (wanted === 'blocked') return rows.filter((r) => r.withdrawBlocked);
+  if (wanted === 'active' || wanted === 'registered') return rows.filter((r) => r.segment === wanted);
+  return rows;
 }
 
 function findMember(state, id) {
