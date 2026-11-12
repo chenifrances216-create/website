@@ -1,0 +1,18 @@
+{
+  "name": "ship-transfer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ship Transfer - mfumo wa amana, utoaji, uwekezaji na mialiko",
+  "main": "server.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "build": "node scripts/build.js",
+    "test": "node --test tests/"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
