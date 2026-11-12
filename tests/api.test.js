@@ -49,8 +49,6 @@ let counter = 0;
 function nextUser() {
   counter += 1;
   return {
-    name: `Member ${counter}`,
-    email: `member${counter}@ship.test`,
     phone: `0712${String(100000 + counter).slice(-6)}`,
     password: 'secret1234',
   };
@@ -171,7 +169,7 @@ test('config exposes the 13 ship levels and the withdrawal rules', async () => {
   ]);
 });
 
-test('a new member registers with name, phone, email and password', async () => {
+test('a new member registers with a phone number and password', async () => {
   const account = await registerUser();
   assert.ok(account.token);
   assert.equal(account.user.balance, 1000);
@@ -181,50 +179,45 @@ test('a new member registers with name, phone, email and password', async () => 
 
   const me = await call('/me', { token: account.token });
   assert.equal(me.status, 200);
-  assert.equal(me.data.user.email, account.email);
+  assert.equal(me.data.user.phone, account.user.phone);
+  assert.equal(me.data.user.email, undefined);
 });
 
-test('registration rejects invalid details and a used email', async () => {
+test('registration rejects invalid details and a used phone number', async () => {
   const account = await registerUser();
 
   const duplicate = await call('/auth/register', {
     method: 'POST',
-    body: { name: 'Other', email: account.email, phone: '0712999999', password: 'secret1234' },
+    body: { phone: account.user.phone, password: 'secret1234' },
   });
   assert.equal(duplicate.status, 409);
 
   const badPhone = await call('/auth/register', {
     method: 'POST',
-    body: { name: 'Other', email: 'bad-phone@ship.test', phone: '123', password: 'secret1234' },
+    body: { phone: '123', password: 'secret1234' },
   });
   assert.equal(badPhone.status, 400);
 
   const shortPassword = await call('/auth/register', {
     method: 'POST',
-    body: { name: 'Other', email: 'short@ship.test', phone: '0712888888', password: '123' },
+    body: { phone: '0712888888', password: '123' },
   });
   assert.equal(shortPassword.status, 400);
 });
 
-test('login works with the email and with the phone number', async () => {
+test('login works with the phone number and rejects a wrong password', async () => {
   const account = await registerUser();
-
-  const byEmail = await call('/auth/login', {
-    method: 'POST',
-    body: { email: account.email, password: account.password },
-  });
-  assert.equal(byEmail.status, 200);
-  assert.ok(byEmail.data.token);
 
   const byPhone = await call('/auth/login', {
     method: 'POST',
-    body: { email: account.phone, password: account.password },
+    body: { phone: account.phone, password: account.password },
   });
   assert.equal(byPhone.status, 200);
+  assert.ok(byPhone.data.token);
 
   const wrong = await call('/auth/login', {
     method: 'POST',
-    body: { email: account.email, password: 'wrong-password' },
+    body: { phone: account.phone, password: 'wrong-password' },
   });
   assert.equal(wrong.status, 401);
 });
@@ -249,7 +242,7 @@ test('an approved deposit becomes locked capital, not withdrawable profit', asyn
   const overview = await call('/admin/overview', { token: admin });
   const request = overview.data.requests.find((r) => r.id === deposit.data.transaction.id);
   assert.ok(request, 'the request should reach the admin queue');
-  assert.equal(request.user.email, account.email);
+  assert.equal(request.user.phone, account.user.phone);
 
   const approved = await call(`/admin/transactions/${request.id}/decision`, {
     method: 'POST',
@@ -543,7 +536,7 @@ test('changing the password requires the current one', async () => {
 
   const login = await call('/auth/login', {
     method: 'POST',
-    body: { email: account.email, password: 'newpass123' },
+    body: { phone: account.phone, password: 'newpass123' },
   });
   assert.equal(login.status, 200);
 });
