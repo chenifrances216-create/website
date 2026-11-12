@@ -646,8 +646,7 @@ h2, h3, h4 { letter-spacing: -0.3px; }
 }
 .invite-link-label {
   font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--muted);
 }
 .invite-link b {
