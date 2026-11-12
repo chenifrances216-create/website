@@ -88,30 +88,54 @@ function createApp() {
       return res.status(400).json({ error: 'Data ya webhook si sahihi' });
     }
     const data = (payload && payload.data) || {};
-    const txn = domain.findDepositByRef(state, String(data.tx_ref || ''));
-    if (!txn) return res.status(404).json({ error: 'Muamala haupatikani' });
+    const status = String(data.status || '').toLowerCase();
 
-    const status = String(data.status || '');
-    if (status !== 'successful') {
-      if (status === 'failed') {
-        domain.failDeposit(state, txn, data.processor_response || 'Malipo hayakufanikiwa');
-        db.commit();
+    // Amana (charge) au utoaji (transfer)
+    const deposit = domain.findDepositByRef(state, String(data.tx_ref || ''));
+    if (deposit) {
+      if (status !== 'successful') {
+        if (status === 'failed') {
+          domain.failDeposit(state, deposit, data.processor_response || 'Malipo hayakufanikiwa');
+          db.commit();
+        }
+        return res.json({ ok: true, ignored: true });
       }
-      return res.json({ ok: true, ignored: true });
+      try {
+        domain.completeDeposit(state, deposit, {
+          providerRef: String(data.id || ''),
+          amount: data.amount != null ? Number(data.amount) : null,
+          currency: data.currency,
+          source: 'webhook',
+        });
+        db.commit();
+        return res.json({ ok: true });
+      } catch (err) {
+        db.commit();
+        return res.status(err.status || 500).json({ error: err.message });
+      }
     }
-    try {
-      domain.completeDeposit(state, txn, {
-        providerRef: String(data.id || ''),
-        amount: data.amount != null ? Number(data.amount) : null,
-        currency: data.currency,
-        source: 'webhook',
-      });
-      db.commit();
-      return res.json({ ok: true });
-    } catch (err) {
-      db.commit();
-      return res.status(err.status || 500).json({ error: err.message });
+
+    const withdrawal = domain.findWithdrawByRef(state, String(data.reference || data.tx_ref || ''));
+    if (!withdrawal) return res.status(404).json({ error: 'Muamala haupatikani' });
+
+    if (['successful', 'completed'].includes(status)) {
+      try {
+        domain.completePayout(state, withdrawal, {
+          providerRef: String(data.id || ''),
+          source: 'webhook',
+        });
+        db.commit();
+        return res.json({ ok: true });
+      } catch (err) {
+        db.commit();
+        return res.status(err.status || 500).json({ error: err.message });
+      }
     }
+    if (status === 'failed') {
+      domain.failPayout(state, withdrawal, data.complete_message || 'Utoaji haukufanikiwa');
+      db.commit();
+    }
+    return res.json({ ok: true, ignored: true });
   });
 
   app.use(express.json({ limit: '64kb' }));
@@ -302,7 +326,41 @@ function createApp() {
   app.post('/api/withdraw', requireAuth, (req, res) => {
     const txn = domain.createWithdraw(state, req.user, req.body || {});
     db.commit();
-    res.status(201).json({ transaction: domain.serializeTxn(txn), user: domain.publicUser(state, req.user) });
+    res.status(201).json({
+      transaction: domain.serializeTxn(txn),
+      user: domain.publicUser(state, req.user),
+      payout: {
+        mode: payments.mode(),
+        automatic: payments.isMobileMethod(txn.method),
+        message: payments.isMobileMethod(txn.method)
+          ? 'Msimamizi akikubali, pesa hutumwa moja kwa moja kwenye simu yako.'
+          : 'Ombi linasubiri uthibitisho wa msimamizi.',
+      },
+    });
+  });
+
+  // Hali ya utoaji: hukagua mtoa huduma na kukamilisha ikiwa imetumwa
+  app.get('/api/withdraw/:id', requireAuth, async (req, res) => {
+    const txn = domain.findWithdraw(state, req.user.id, req.params.id);
+    if (!txn) return res.status(404).json({ error: 'Ombi la utoaji halipo' });
+    const meta = txn.meta || {};
+
+    if (txn.status === 'processing' && meta.providerRef && payments.isLive()) {
+      const remote = await payments.fetchTransfer(meta.providerRef).catch(() => null);
+      if (remote && ['successful', 'completed'].includes(String(remote.status).toLowerCase())) {
+        domain.completePayout(state, txn, { providerRef: meta.providerRef, source: 'verify' });
+        db.commit();
+      } else if (remote && String(remote.status).toLowerCase() === 'failed') {
+        domain.failPayout(state, txn, 'Utoaji haukufanikiwa');
+        db.commit();
+      }
+    }
+
+    res.json({
+      transaction: domain.serializeTxn(txn),
+      user: domain.publicUser(state, req.user),
+      payment: { mode: payments.mode(), status: txn.status },
+    });
   });
 
   app.post('/api/invest', requireAuth, (req, res) => {
@@ -365,11 +423,23 @@ function createApp() {
         users: state.users.filter((u) => u.role !== 'admin').length,
         pendingDeposits: pending.filter((t) => t.type === 'deposit').length,
         pendingWithdrawals: pending.filter((t) => t.type === 'withdraw').length,
+        processingWithdrawals: state.transactions.filter((t) => t.type === 'withdraw' && t.status === 'processing').length,
         totalDeposited: sum('deposit'),
         totalWithdrawn: sum('withdraw'),
         totalInvested: sum('invest'),
       },
       requests: pending,
+      payouts: state.transactions
+        .filter((t) => t.type === 'withdraw' && t.status === 'processing')
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 20)
+        .map((t) => {
+          const owner = state.users.find((u) => u.id === t.userId);
+          return {
+            ...domain.serializeTxn(t),
+            user: owner ? { id: owner.id, name: owner.name, email: owner.email, phone: owner.phone } : null,
+          };
+        }),
       recentUsers: state.users
         .filter((u) => u.role !== 'admin')
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -386,14 +456,74 @@ function createApp() {
     });
   });
 
-  app.post('/api/admin/transactions/:id/decision', requireAuth, requireAdmin, (req, res) => {
+  app.post('/api/admin/transactions/:id/decision', requireAuth, requireAdmin, async (req, res) => {
     const body = req.body || {};
-    const result = domain.decideRequest(state, req.params.id, String(body.action || ''), body.note);
-    db.commit();
-    res.json({
-      transaction: domain.serializeTxn(result.txn),
-      user: domain.publicUser(state, result.user),
-    });
+    const action = String(body.action || '');
+    const txn = state.transactions.find((t) => t.id === req.params.id);
+    if (!txn) return res.status(404).json({ error: 'Ombi halipo' });
+
+    // Utoaji wa simu: hulipwa kiotomatiki kupitia mtoa huduma
+    if (action === 'approve' && txn.type === 'withdraw' && payments.isMobileMethod(txn.method)) {
+      let started = false;
+      try {
+        const { user } = domain.startPayout(state, txn, { provider: payments.mode(), by: req.user.id });
+        started = true;
+        db.commit();
+
+        const transfer = await payments.initiateTransfer({
+          amount: txn.amount,
+          currency: 'TZS',
+          account: txn.meta && txn.meta.account,
+          method: txn.method,
+          reference: txn.id,
+          narration: `Utoaji wa Ship Transfer ${txn.id}`,
+          beneficiaryName: user.name,
+        });
+
+        txn.meta = {
+          ...(txn.meta || {}),
+          provider: transfer.provider,
+          providerRef: transfer.providerRef,
+          sandbox: Boolean(transfer.sandbox),
+          payoutMessage: transfer.message,
+        };
+        const done = ['completed', 'successful'].includes(String(transfer.status).toLowerCase());
+        const result = done
+          ? domain.completePayout(state, txn, { providerRef: transfer.providerRef, source: 'provider' })
+          : { txn, user };
+        db.commit();
+
+        return res.json({
+          transaction: domain.serializeTxn(txn),
+          user: domain.publicUser(state, result.user),
+          payout: {
+            mode: payments.mode(),
+            status: txn.status,
+            providerRef: transfer.providerRef,
+            sandbox: Boolean(transfer.sandbox),
+            message: transfer.message,
+          },
+        });
+      } catch (err) {
+        if (started) domain.failPayout(state, txn, err.message);
+        db.commit();
+        if (err instanceof payments.PaymentError) {
+          return res.status(err.status === 400 ? 400 : 502).json({ error: err.message });
+        }
+        return res.status(err.status || 500).json({ error: err.message });
+      }
+    }
+
+    try {
+      const result = domain.decideRequest(state, txn.id, action, body.note);
+      db.commit();
+      return res.json({
+        transaction: domain.serializeTxn(result.txn),
+        user: domain.publicUser(state, result.user),
+      });
+    } catch (err) {
+      return res.status(err.status || 500).json({ error: err.message });
+    }
   });
 
   app.use('/api', (req, res) => {

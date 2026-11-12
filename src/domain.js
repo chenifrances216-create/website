@@ -366,6 +366,69 @@ function createWithdraw(state, user, input) {
   });
 }
 
+function findWithdraw(state, userId, id) {
+  return (
+    state.transactions.find((t) => t.id === id && t.userId === userId && t.type === 'withdraw') || null
+  );
+}
+
+function findWithdrawByRef(state, reference) {
+  return state.transactions.find((t) => t.id === reference && t.type === 'withdraw') || null;
+}
+
+// Anzisha utoaji wa kiotomatiki (payout) kwa mtandao wa simu
+function startPayout(state, txn, info = {}) {
+  if (!txn) throw new ApiError(404, 'Ombi halipo');
+  if (txn.type !== 'withdraw') throw new ApiError(400, 'Ombi hili si la utoaji');
+  if (txn.status !== 'pending') throw new ApiError(400, 'Ombi hili tayari limeshughulikiwa');
+  const user = state.users.find((u) => u.id === txn.userId);
+  if (!user) throw new ApiError(404, 'Mtumiaji halipo');
+  txn.status = 'processing';
+  txn.meta = {
+    ...(txn.meta || {}),
+    channel: 'mobile_money',
+    payoutStatus: 'processing',
+    provider: info.provider || payments.mode(),
+    providerRef: info.providerRef || null,
+    sandbox: Boolean(info.sandbox),
+    payoutStartedAt: nowIso(),
+    decidedBy: info.by || null,
+  };
+  return { txn, user };
+}
+
+// Kamilisha utoaji: hulipia mtu mara moja tu hata webhook irudi tena
+function completePayout(state, txn, info = {}) {
+  if (!txn) throw new ApiError(404, 'Ombi halipo');
+  const user = state.users.find((u) => u.id === txn.userId);
+  if (!user) throw new ApiError(404, 'Mtumiaji halipo');
+  if (txn.status === 'completed') return { paid: false, txn, user };
+  if (txn.status === 'rejected') throw new ApiError(400, 'Ombi limekataliwa');
+  txn.status = 'completed';
+  txn.decidedAt = nowIso();
+  txn.meta = {
+    ...(txn.meta || {}),
+    payoutStatus: 'completed',
+    providerRef: info.providerRef || (txn.meta && txn.meta.providerRef) || null,
+    paidAt: nowIso(),
+    paidBy: info.source || 'provider',
+  };
+  user.paidOut = (user.paidOut || 0) + txn.amount;
+  return { paid: true, txn, user };
+}
+
+// Utoaji umeshindikana: ombi linarudi kwenye foleni ili msimamizi ajaribu tena
+function failPayout(state, txn, reason) {
+  if (!txn || txn.status !== 'processing') return txn;
+  txn.status = 'pending';
+  txn.meta = {
+    ...(txn.meta || {}),
+    payoutStatus: 'failed',
+    error: String(reason || 'Utoaji haukufanikiwa').slice(0, 160),
+  };
+  return txn;
+}
+
 function createInvestment(state, user, input) {
   const pkg = packageById(input.packageId);
   if (!pkg) throw new ApiError(400, 'Kifurushi cha VIP hakipo');
@@ -441,6 +504,7 @@ function serializeTxn(txn) {
     provider: (txn.meta && txn.meta.provider) || null,
     providerRef: (txn.meta && txn.meta.providerRef) || null,
     paymentStatus: (txn.meta && txn.meta.paymentStatus) || null,
+    payoutStatus: (txn.meta && txn.meta.payoutStatus) || null,
     sandbox: Boolean(txn.meta && txn.meta.sandbox),
     failureReason: (txn.meta && txn.meta.error) || null,
     adminNote: txn.adminNote || null,
@@ -492,13 +556,17 @@ module.exports = {
   attachPayment,
   changePassword,
   completeDeposit,
+  completePayout,
   createDeposit,
-  failDeposit,
-  findDeposit,
-  findDepositByRef,
-  createInvestment,
   createWithdraw,
   decideRequest,
+  failDeposit,
+  failPayout,
+  findDeposit,
+  findDepositByRef,
+  findWithdraw,
+  findWithdrawByRef,
+  startPayout,
   inviteSummary,
   login,
   money,
