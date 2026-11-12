@@ -120,6 +120,7 @@ async function loadAll() {
     renderAudit();
     $('#default-warning').hidden = !data.usingDefault;
     await Promise.all([loadRequests('deposit'), loadRequests('withdraw')]);
+    renderQueue();
   } catch (err) {
     toast(err.message, true);
   }
@@ -391,9 +392,51 @@ async function loadRequests(kind) {
       state.withdrawals = data;
       renderRequests('withdraw');
     }
+    renderQueue();
   } catch (err) {
     toast(err.message, true);
   }
+}
+
+function pendingRows() {
+  const out = [];
+  const add = (data, kind) => {
+    ((data && data.requests) || []).forEach((r) => {
+      if (r.status === 'pending') out.push({ ...r, kind });
+    });
+  };
+  add(state.deposits, 'deposit');
+  add(state.withdrawals, 'withdraw');
+  out.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  return out;
+}
+
+function renderQueue() {
+  const card = $('#queue-card');
+  if (!card) return;
+  const rows = pendingRows();
+  const countEl = $('#queue-count');
+  if (countEl) countEl.textContent = rows.length ? `${rows.length} waiting` : '';
+  card.hidden = rows.length === 0;
+  const listEl = $('#pending-queue');
+  if (!listEl) return;
+  if (!rows.length) {
+    listEl.innerHTML = '';
+    return;
+  }
+  listEl.innerHTML = rows.map((r) => `
+    <article class="queue-item">
+      <div class="queue-main">
+        <span class="pill ${r.kind === 'deposit' ? 'good' : 'warn'}">${r.kind === 'deposit' ? 'Deposit' : 'Withdrawal'}</span>
+        <strong>${esc(money(r.amount))}</strong>
+        <span class="muted tiny block">${esc(r.member ? r.member.phone : 'deleted account')} · ${esc(r.method || '—')} · ${esc(when(r.createdAt))}</span>
+        ${r.kind === 'withdraw' ? `<span class="muted tiny block">Fee ${esc(money(r.fee))} → pays out ${esc(money(r.net))}</span>` : ''}
+      </div>
+      <div class="queue-actions">
+        <button class="btn primary" data-decide="approve" data-id="${esc(r.id)}" data-kind="${r.kind}" type="button">Approve</button>
+        <button class="btn danger" data-decide="reject" data-id="${esc(r.id)}" data-kind="${r.kind}" type="button">Reject</button>
+      </div>
+    </article>`).join('');
 }
 
 function renderRequests(kind) {
@@ -452,13 +495,16 @@ document.addEventListener('click', async (event) => {
   const decideBtn = event.target.closest('[data-decide]');
   if (decideBtn) {
     const { decide, id, kind } = decideBtn.dataset;
+    const siblings = decideBtn.parentElement ? Array.from(decideBtn.parentElement.querySelectorAll('[data-decide]')) : [];
     decideBtn.disabled = true;
+    siblings.forEach((btn) => { btn.disabled = true; });
     try {
       await api(`/requests/${id}/decision`, { method: 'POST', body: { action: decide } });
       toast(`${kind === 'deposit' ? 'Deposit' : 'Withdrawal'} ${decide === 'approve' ? 'approved' : 'rejected'}`);
       await loadAll();
     } catch (err) {
       decideBtn.disabled = false;
+      siblings.forEach((btn) => { btn.disabled = false; });
       toast(err.message, true);
     }
   }
