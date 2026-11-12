@@ -500,7 +500,6 @@ test('uigaji wa malipo huzuiwa pale funguo halisi zimewekwa', async () => {
 
 /* ---------------- Utoaji wa kiotomatiki (payout) ---------------- */
 
-const payments = require('../src/payments');
 const domain = require('../src/domain');
 
 async function fundedUser(amount) {
