@@ -1,420 +1,119 @@
-<!doctype html>
-<html lang="sw">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Ship Transfer — Amana, Uwekezaji na Utoaji</title>
-    <meta name="description" content="Ship Transfer: jisajili, weka pesa, wekeza kwenye VIP packages, toa pesa na alika marafiki." />
-    <meta name="theme-color" content="#070d18" />
-    <link rel="stylesheet" href="styles.css" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230d1729'/%3E%3Cpath d='M12 38h26l8-10 6 3-6 12H12z' fill='%23f5c451'/%3E%3C/svg%3E" />
-  </head>
-  <body>
-    <!-- ============ KURASA YA KUINGIA / USAJILI ============ -->
-    <div id="auth-screen" class="auth-shell">
-      <section class="auth-hero">
-        <div class="brand brand--lg">
-          <span class="brand__mark" aria-hidden="true">
-            <svg viewBox="0 0 48 48" width="28" height="28"><path d="M6 30h22l7-9 5 2-5 10H6z" fill="currentColor"/><path d="M14 20h9l4-6 4 1.5-4 6.5h-13z" fill="currentColor" opacity=".55"/></svg>
-          </span>
-          <span class="brand__text">Ship<strong>Transfer</strong></span>
-        </div>
-        <h1 class="hero-title">Pesa yako isafiri kwa usalama, ikue kila siku.</h1>
-        <p class="hero-sub">
-          Amana, utoaji, uwekezaji wa VIP na bonasi za mialiko — vyote mahali pamoja, kwa
-          muundo rahisi wa kutumia kwenye simu au kompyuta.
-        </p>
-        <ul class="hero-points">
-          <li><span class="dot"></span> Weka na toa pesa kupitia M-Pesa, Mixx, Airtel Money na benki</li>
-          <li><span class="dot"></span> VIP packages zenye faida ya kila siku hadi 3.5%</li>
-          <li><span class="dot"></span> Alika rafiki na upate bonasi ya TZS 2,000 kwa kila mmoja</li>
-          <li><span class="dot"></span> Historia kamili ya kila muamala</li>
-        </ul>
-        <div class="hero-stats">
-          <div><strong>5</strong><span>VIP packages</span></div>
-          <div><strong>24/7</strong><span>Ufikiaji</span></div>
-          <div><strong>TZS</strong><span>Sarafu</span></div>
-        </div>
-      </section>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Ship Transfer — Deposit, Ships &amp; Withdrawals</title>
+  <meta name="description" content="Ship Transfer: deposit capital, rent a ship from our fleet, earn profit every business day and withdraw it." />
+  <meta name="theme-color" content="#0f7a45" />
+  <link rel="icon" href="/img/ships/level-1.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-      <section class="auth-panel">
-        <div class="auth-card">
-          <div class="auth-tabs" role="tablist">
-            <button class="auth-tab is-active" data-auth-tab="login" type="button" role="tab">Ingia</button>
-            <button class="auth-tab" data-auth-tab="register" type="button" role="tab">Jisajili</button>
-          </div>
-
-          <form id="login-form" class="form" data-auth-pane="login" novalidate>
-            <h2 class="form-title">Karibu tena</h2>
-            <p class="form-sub">Ingia kwenye akaunti yako kuendelea.</p>
-            <label class="field">
-              <span>Barua pepe au namba ya simu</span>
-              <input type="text" name="email" autocomplete="username" placeholder="jina@barua.com au 0712345678" required />
-            </label>
-            <label class="field">
-              <span>Neno la siri</span>
-              <input type="password" name="password" autocomplete="current-password" placeholder="••••••••" required />
-            </label>
-            <button class="btn btn--primary btn--block" type="submit">Ingia</button>
-            <p class="form-foot">Hauna akaunti? <button class="link" type="button" data-auth-tab="register">Jisajili bure</button></p>
-          </form>
-
-          <form id="register-form" class="form" data-auth-pane="register" hidden novalidate>
-            <h2 class="form-title">Fungua akaunti</h2>
-            <p class="form-sub">Jaza taarifa zako kuanza. Utapata bonasi ya TZS 1,000.</p>
-            <label class="field">
-              <span>Jina kamili</span>
-              <input type="text" name="name" autocomplete="name" placeholder="Mfano: Asha Juma" required />
-            </label>
-            <label class="field">
-              <span>Namba ya simu</span>
-              <input type="tel" name="phone" autocomplete="tel" placeholder="0712 345 678" required />
-            </label>
-            <label class="field">
-              <span>Barua pepe</span>
-              <input type="email" name="email" autocomplete="email" placeholder="jina@barua.com" required />
-            </label>
-            <label class="field">
-              <span>Neno la siri</span>
-              <input type="password" name="password" autocomplete="new-password" placeholder="Herufi 6 au zaidi" required />
-            </label>
-            <label class="field">
-              <span>Kodi ya mwaliko <em>(si lazima)</em></span>
-              <input type="text" name="inviteCode" placeholder="SHIPAB12C" />
-            </label>
-            <button class="btn btn--primary btn--block" type="submit">Jisajili na uingie</button>
-            <p class="form-foot">Tayari una akaunti? <button class="link" type="button" data-auth-tab="login">Ingia</button></p>
-          </form>
-
-          <p class="auth-note">Taarifa zako zimehifadhiwa kwa usalama. Neno la siri halionyeshwi kwa mtu yeyote.</p>
-        </div>
-      </section>
-    </div>
-
-    <!-- ============ APP ============ -->
-    <div id="app-screen" class="app-shell" hidden>
-      <aside class="sidebar">
-        <div class="brand">
-          <span class="brand__mark" aria-hidden="true">
-            <svg viewBox="0 0 48 48" width="24" height="24"><path d="M6 30h22l7-9 5 2-5 10H6z" fill="currentColor"/><path d="M14 20h9l4-6 4 1.5-4 6.5h-13z" fill="currentColor" opacity=".55"/></svg>
-          </span>
-          <span class="brand__text">Ship<strong>Transfer</strong></span>
-        </div>
-        <nav class="side-nav">
-          <button class="nav-item is-active" data-go="dashboard" type="button"><span class="nav-ico">▦</span> Nyumbani</button>
-          <button class="nav-item" data-go="deposit" type="button"><span class="nav-ico">↓</span> Weka Pesa</button>
-          <button class="nav-item" data-go="withdraw" type="button"><span class="nav-ico">↑</span> Toa Pesa</button>
-          <button class="nav-item" data-go="invest" type="button"><span class="nav-ico">◆</span> Wekeza (VIP)</button>
-          <button class="nav-item" data-go="history" type="button"><span class="nav-ico">≡</span> Historia</button>
-          <button class="nav-item" data-go="invite" type="button"><span class="nav-ico">＋</span> Alika Rafiki</button>
-          <button class="nav-item" data-go="account" type="button"><span class="nav-ico">☺</span> Akaunti</button>
-          <button class="nav-item nav-item--admin" data-go="admin" type="button" hidden><span class="nav-ico">★</span> Msimamizi</button>
-        </nav>
-        <div class="side-foot">
-          <div class="side-balance">
-            <span>Salio</span>
-            <strong id="side-balance">TZS 0</strong>
-          </div>
-          <button class="btn btn--ghost btn--block" type="button" data-action="logout">Toka</button>
-        </div>
-      </aside>
-
-      <div class="app-main">
-        <header class="topbar">
-          <div class="topbar__left">
-            <div class="brand brand--compact">
-              <span class="brand__mark" aria-hidden="true">
-                <svg viewBox="0 0 48 48" width="22" height="22"><path d="M6 30h22l7-9 5 2-5 10H6z" fill="currentColor"/></svg>
-              </span>
-              <span class="brand__text">Ship<strong>Transfer</strong></span>
-            </div>
-            <div class="topbar__greet">
-              <span id="top-greeting">Karibu</span>
-              <strong id="top-name">—</strong>
-            </div>
-          </div>
-          <div class="topbar__right">
-            <span class="vip-pill" id="top-vip">VIP 0</span>
-            <div class="avatar" id="top-avatar">S</div>
-          </div>
-        </header>
-
-        <main class="views">
-          <!-- DASHBOARD -->
-          <section class="view is-active" data-view="dashboard">
-            <div class="balance-card">
-              <div class="balance-card__head">
-                <span class="label">Salio lililopo</span>
-                <span class="chip chip--gold" id="dash-vip">VIP 0</span>
-              </div>
-              <div class="balance-amount" id="dash-balance">TZS 0</div>
-              <div class="balance-grid">
-                <div><span>Faida jumla</span><strong id="dash-profit">TZS 0</strong></div>
-                <div><span>Uwekezaji hai</span><strong id="dash-active">0</strong></div>
-                <div><span>Maombi yanayosubiri</span><strong id="dash-pending">0</strong></div>
-              </div>
-            </div>
-
-            <div class="quick-grid">
-              <button class="quick" type="button" data-go="deposit"><span class="quick__ico">↓</span> Weka Pesa</button>
-              <button class="quick" type="button" data-go="withdraw"><span class="quick__ico">↑</span> Toa Pesa</button>
-              <button class="quick" type="button" data-go="invest"><span class="quick__ico">◆</span> Wekeza</button>
-              <button class="quick" type="button" data-go="invite"><span class="quick__ico">＋</span> Alika Rafiki</button>
-            </div>
-
-            <div class="card">
-              <div class="card__head">
-                <h3>Uwekezaji wako</h3>
-                <button class="link" type="button" data-go="invest">Ongeza</button>
-              </div>
-              <div id="dash-investments" class="list"></div>
-            </div>
-
-            <div class="card">
-              <div class="card__head">
-                <h3>Historia ya karibuni</h3>
-                <button class="link" type="button" data-go="history">Zote</button>
-              </div>
-              <div id="dash-txns" class="list"></div>
-            </div>
-          </section>
-
-          <!-- DEPOSIT -->
-          <section class="view" data-view="deposit">
-            <div class="view-head">
-              <h2>Weka Pesa (Deposit)</h2>
-              <p>Chagua M-Pesa au Tigo Pesa, weka kiasi, kisha thibitisha kwenye simu yako.</p>
-            </div>
-            <div class="grid-2">
-              <form id="deposit-form" class="card form" novalidate>
-                <div id="pay-mode-banner" class="pay-banner" hidden></div>
-
-                <div class="field">
-                  <span>Njia ya malipo</span>
-                  <div class="pay-methods" id="pay-methods" role="radiogroup" aria-label="Njia ya malipo"></div>
-                  <input type="hidden" name="method" id="deposit-method" value="M-Pesa" />
-                </div>
-
-                <label class="field">
-                  <span>Kiasi (TZS)</span>
-                  <input type="number" name="amount" min="5000" step="1000" placeholder="10000" required />
-                  <em id="deposit-min-hint">Kiasi cha chini: TZS 5,000</em>
-                </label>
-
-                <label class="field" id="deposit-phone-field">
-                  <span>Namba ya simu ya kulipia</span>
-                  <input type="tel" name="phone" autocomplete="tel" placeholder="0712 345 678" />
-                  <em>Utapokea ombi la malipo kwenye simu hii — weka PIN yako kukamilisha.</em>
-                </label>
-
-                <label class="field" id="deposit-reference-field" hidden>
-                  <span>Namba ya muamala / kumbukumbu <em>(kwa benki)</em></span>
-                  <input type="text" name="reference" maxlength="60" placeholder="Mfano: MP2400123ABCD" />
-                </label>
-
-                <div class="amount-chips" data-target="deposit-form" data-field="amount">
-                  <button type="button" data-amount="10000">10,000</button>
-                  <button type="button" data-amount="50000">50,000</button>
-                  <button type="button" data-amount="200000">200,000</button>
-                  <button type="button" data-amount="500000">500,000</button>
-                </div>
-
-                <button class="btn btn--primary btn--block" type="submit" id="deposit-submit">Lipa kwa M-Pesa</button>
-
-                <div id="deposit-wait" class="pay-wait" hidden>
-                  <span class="spinner" aria-hidden="true"></span>
-                  <div class="pay-wait__body">
-                    <strong id="deposit-wait-title">Angalia simu yako…</strong>
-                    <p class="muted" id="deposit-wait-text">Tumekutumia ombi la malipo. Weka PIN yako kukamilisha.</p>
-                    <button type="button" class="btn btn--ghost btn--sm" id="deposit-simulate" hidden>Thibitisha malipo (majaribio)</button>
-                  </div>
-                </div>
-              </form>
-
-              <div class="card">
-                <h3>Jinsi inavyofanya kazi</h3>
-                <ul class="bullets">
-                  <li><strong>M-Pesa / Tigo Pesa:</strong> ombi la malipo (USSD) linatumwa kwenye simu yako; ukiweka PIN, salio linaingia mara moja.</li>
-                  <li><strong>Benki:</strong> tuma kiasi kwenye akaunti ya kampuni kisha wasilisha ombi; msimamizi atathibitisha.</li>
-                  <li>Kiasi cha chini ni TZS 5,000. Usitume pesa kwa mtu binafsi.</li>
-                </ul>
-                <div class="pay-box" id="deposit-bank-box" hidden>
-                  <div class="pay-row"><span>Jina la mpokeaji</span><strong>SHIP TRANSFER LTD</strong></div>
-                  <div class="pay-row"><span>Namba ya akaunti</span><strong id="deposit-account">150 456 789</strong></div>
-                </div>
-                <p class="muted" id="deposit-live-note"></p>
-              </div>
-            </div>
-          </section>
-
-          <!-- WITHDRAW -->
-          <section class="view" data-view="withdraw">
-            <div class="view-head">
-              <h2>Toa Pesa (Withdraw)</h2>
-              <p>Omba utoaji kutoka salio lako. Kiasi cha chini ni TZS 10,000.</p>
-            </div>
-            <div class="grid-2">
-              <form id="withdraw-form" class="card form" novalidate>
-                <label class="field">
-                  <span>Kiasi (TZS)</span>
-                  <input type="number" name="amount" min="10000" step="1000" placeholder="10000" required />
-                  <em>Salio linalopatikana: <strong id="withdraw-balance">TZS 0</strong></em>
-                </label>
-                <label class="field">
-                  <span>Njia ya kupokea</span>
-                  <select name="method" id="withdraw-method" required></select>
-                </label>
-                <label class="field">
-                  <span>Namba ya simu / akaunti</span>
-                  <input type="text" name="account" maxlength="40" placeholder="0712 345 678" required />
-                  <em id="withdraw-hint">Pesa hutumwa moja kwa moja kwenye simu yako baada ya msimamizi kukubali.</em>
-                </label>
-                <div class="amount-chips" data-target="withdraw-form" data-field="amount">
-                  <button type="button" data-amount="10000">10,000</button>
-                  <button type="button" data-amount="50000">50,000</button>
-                  <button type="button" data-amount="100000">100,000</button>
-                </div>
-                <button class="btn btn--primary btn--block" type="submit">Tuma ombi la utoaji</button>
-              </form>
-              <div class="card">
-                <h3>Sheria za utoaji</h3>
-                <ul class="bullets">
-                  <li>Kiasi hiki kinakatiwa kwenye salio mara ombi linapowasilishwa.</li>
-                  <li>Msimamizi akikubali, M-Pesa au Tigo Pesa hutuma pesa moja kwa moja kwenye namba yako.</li>
-                  <li>Ombi likikataliwa au utoaji ukishindikana, kiasi kinarudishwa kwenye salio lako.</li>
-                  <li>Hakuna ada ya utoaji kwa sasa.</li>
-                </ul>
-              </div>
-            </div>
-          </section>
-
-          <!-- INVEST -->
-          <section class="view" data-view="invest">
-            <div class="view-head">
-              <h2>Wekeza — VIP Packages</h2>
-              <p>Chagua kifurushi, wekeza kutoka salio lako, na upate faida kila siku kwa siku 30.</p>
-            </div>
-            <div id="packages-grid" class="packages"></div>
-          </section>
-
-          <!-- HISTORY -->
-          <section class="view" data-view="history">
-            <div class="view-head">
-              <h2>Historia ya Muamala</h2>
-              <p>Kila amana, utoaji, uwekezaji, faida na bonasi.</p>
-            </div>
-            <div class="card">
-              <div class="filter-chips" id="history-filters">
-                <button class="chip-btn is-active" data-filter="all" type="button">Zote</button>
-                <button class="chip-btn" data-filter="deposit" type="button">Amana</button>
-                <button class="chip-btn" data-filter="withdraw" type="button">Utoaji</button>
-                <button class="chip-btn" data-filter="invest" type="button">Uwekezaji</button>
-                <button class="chip-btn" data-filter="profit" type="button">Faida</button>
-                <button class="chip-btn" data-filter="bonus" type="button">Bonasi</button>
-              </div>
-              <div id="history-list" class="list"></div>
-            </div>
-          </section>
-
-          <!-- INVITE -->
-          <section class="view" data-view="invite">
-            <div class="view-head">
-              <h2>Alika Rafiki</h2>
-              <p>Pata TZS 2,000 kwa kila rafiki anayejisajili kwa kodi yako.</p>
-            </div>
-            <div class="card invite-card">
-              <div class="invite-code">
-                <span>Kodi yako ya mwaliko</span>
-                <strong id="invite-code">—</strong>
-              </div>
-              <div class="invite-link">
-                <input type="text" id="invite-link" readonly />
-                <button class="btn btn--primary" type="button" data-action="copy-invite">Nakili</button>
-              </div>
-              <div class="invite-stats">
-                <div><span>Marafiki waliojiunga</span><strong id="invite-count">0</strong></div>
-                <div><span>Bonasi ulizopata</span><strong id="invite-earned">TZS 0</strong></div>
-              </div>
-            </div>
-            <div class="card">
-              <h3>Marafiki wako</h3>
-              <div id="invite-list" class="list"></div>
-            </div>
-          </section>
-
-          <!-- ACCOUNT -->
-          <section class="view" data-view="account">
-            <div class="view-head">
-              <h2>Akaunti Yangu</h2>
-              <p>Taarifa zako na usalama wa akaunti.</p>
-            </div>
-            <div class="grid-2">
-              <div class="card">
-                <h3>Taarifa binafsi</h3>
-                <div class="kv"><span>Jina</span><strong id="acc-name">—</strong></div>
-                <div class="kv"><span>Barua pepe</span><strong id="acc-email">—</strong></div>
-                <div class="kv"><span>Namba ya simu</span><strong id="acc-phone">—</strong></div>
-                <div class="kv"><span>Kodi ya mwaliko</span><strong id="acc-code">—</strong></div>
-                <div class="kv"><span>Kiwango</span><strong id="acc-vip">VIP 0</strong></div>
-                <div class="kv"><span>Mwanachama tangu</span><strong id="acc-since">—</strong></div>
-                <button class="btn btn--ghost btn--block" type="button" data-action="logout">Toka kwenye akaunti</button>
-              </div>
-              <form id="password-form" class="card form" novalidate>
-                <h3>Badilisha neno la siri</h3>
-                <label class="field">
-                  <span>Neno la siri la sasa</span>
-                  <input type="password" name="currentPassword" autocomplete="current-password" required />
-                </label>
-                <label class="field">
-                  <span>Neno la siri jipya</span>
-                  <input type="password" name="newPassword" autocomplete="new-password" placeholder="Herufi 6 au zaidi" required />
-                </label>
-                <button class="btn btn--primary btn--block" type="submit">Hifadhi mabadiliko</button>
-              </form>
-            </div>
-          </section>
-
-          <!-- ADMIN -->
-          <section class="view" data-view="admin">
-            <div class="view-head">
-              <h2>Msimamizi</h2>
-              <p>Thibitisha au kataa maombi ya amana na utoaji.</p>
-            </div>
-            <div class="admin-stats" id="admin-stats"></div>
-            <div class="card">
-              <h3>Maombi yanayosubiri</h3>
-              <div id="admin-requests" class="list"></div>
-            </div>
-            <div class="card">
-              <h3>Watumiaji wa karibuni</h3>
-              <div id="admin-users" class="list"></div>
-            </div>
-          </section>
-        </main>
-
-        <nav class="bottom-nav">
-          <button class="bn-item is-active" data-go="dashboard" type="button"><span>▦</span>Nyumbani</button>
-          <button class="bn-item" data-go="deposit" type="button"><span>↓</span>Weka</button>
-          <button class="bn-item" data-go="invest" type="button"><span>◆</span>Wekeza</button>
-          <button class="bn-item" data-go="history" type="button"><span>≡</span>Historia</button>
-          <button class="bn-item" data-go="account" type="button"><span>☺</span>Akaunti</button>
-        </nav>
+  <!-- ============ AUTH ============ -->
+  <section id="auth-screen" class="auth">
+    <div class="auth-hero">
+      <div class="brand">
+        <span class="brand-mark">⚓</span>
+        <span class="brand-text">Ship<b>Transfer</b></span>
       </div>
+      <h1>Own a ship.<br /><span class="gold-text">Earn every business day.</span></h1>
+      <p class="hero-copy">
+        Deposit capital, rent a vessel from the fleet and withdraw your profit.
+        Capital stays locked — profit is yours to take.
+      </p>
+      <ul class="hero-points">
+        <li><strong>13 ship levels</strong> from TZS 10,000 to TZS 1,000,000</li>
+        <li><strong>First profit 24 hours</strong> after renting a ship</li>
+        <li><strong>Withdraw Mon – Fri</strong>, 10:00 – 17:00 EAT · 10% fee</li>
+        <li><strong>10% referral bonus</strong> credited automatically</li>
+      </ul>
+      <img class="hero-ship" src="/img/ships/level-13.svg" alt="Cargo ship at sea" />
     </div>
 
-    <dialog id="dialog" class="dialog">
-      <form method="dialog" class="dialog__inner" id="dialog-form">
-        <h3 id="dialog-title">—</h3>
-        <div id="dialog-body" class="dialog__body"></div>
-        <div class="dialog__actions">
-          <button class="btn btn--ghost" type="button" data-action="dialog-cancel">Ghairi</button>
-          <button class="btn btn--primary" type="submit" id="dialog-confirm">Thibitisha</button>
-        </div>
+    <div class="auth-card">
+      <div class="tabs" role="tablist" aria-label="Account access">
+        <button class="tab is-active" data-auth-tab="login" role="tab" aria-selected="true" type="button">Sign in</button>
+        <button class="tab" data-auth-tab="register" role="tab" aria-selected="false" type="button">Create account</button>
+      </div>
+
+      <form id="login-form" class="form" data-auth-pane="login" novalidate>
+        <label class="field">
+          <span>Email or phone number</span>
+          <input type="text" name="email" autocomplete="username" placeholder="you@email.com or 0712 345 678" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input type="password" name="password" autocomplete="current-password" placeholder="Your password" required />
+        </label>
+        <button class="btn btn-primary" type="submit">Sign in</button>
+        <p class="form-note">New here? Choose <strong>Create account</strong> above to register in seconds.</p>
       </form>
-    </dialog>
 
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      <form id="register-form" class="form is-hidden" data-auth-pane="register" novalidate>
+        <label class="field">
+          <span>Full name</span>
+          <input type="text" name="name" autocomplete="name" placeholder="Your full name" required />
+        </label>
+        <label class="field">
+          <span>Phone number</span>
+          <input type="tel" name="phone" autocomplete="tel" placeholder="0712 345 678" required />
+        </label>
+        <label class="field">
+          <span>Email</span>
+          <input type="email" name="email" autocomplete="email" placeholder="you@email.com" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <input type="password" name="password" autocomplete="new-password" placeholder="At least 6 characters" minlength="6" required />
+        </label>
+        <label class="field">
+          <span>Invite code <em>(optional)</em></span>
+          <input type="text" name="inviteCode" id="register-invite" placeholder="SHIP12345" />
+        </label>
+        <button class="btn btn-primary" type="submit">Create account &amp; enter</button>
+        <p class="form-note">You get a TZS 1,000 welcome bonus. Your inviter earns 10% of your first deposit.</p>
+      </form>
+    </div>
+  </section>
 
-    <script src="app.js"></script>
-  </body>
+  <!-- ============ APP ============ -->
+  <section id="app-screen" class="app is-hidden">
+    <header class="topbar">
+      <button class="brand brand-btn" data-go="home" type="button" aria-label="Home">
+        <span class="brand-mark">⚓</span>
+        <span class="brand-text">Ship<b>Transfer</b></span>
+      </button>
+      <div class="topbar-stats">
+        <div class="chip chip-profit">
+          <em>Profit balance</em>
+          <strong id="top-profit">TZS 0</strong>
+        </div>
+        <div class="chip chip-capital">
+          <em>Capital (locked)</em>
+          <strong id="top-capital">TZS 0</strong>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" data-go="history" type="button" aria-label="History">≡</button>
+        <button class="icon-btn" data-go="account" type="button" aria-label="Account">☺</button>
+      </div>
+    </header>
+
+    <main id="view" class="view" aria-live="polite"></main>
+
+    <nav class="tabbar" aria-label="Main">
+      <button class="nav-item is-active" data-go="home" type="button"><span class="nav-ico">⌂</span><span>Home</span></button>
+      <button class="nav-item" data-go="deposit" type="button"><span class="nav-ico">↓</span><span>Deposit</span></button>
+      <button class="nav-item" data-go="withdraw" type="button"><span class="nav-ico">↑</span><span>Withdraw</span></button>
+      <button class="nav-item" data-go="package" type="button"><span class="nav-ico">🚢</span><span>Package</span></button>
+      <button class="nav-item" data-go="invest" type="button"><span class="nav-ico">◆</span><span>Invest</span></button>
+      <button class="nav-item" data-go="invite" type="button"><span class="nav-ico">＋</span><span>Invite</span></button>
+    </nav>
+  </section>
+
+  <script src="/app.js" defer></script>
+</body>
 </html>
