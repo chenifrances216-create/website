@@ -312,6 +312,13 @@ input:focus, select:focus {
 .card h2, .card h3 { margin: 0; }
 .card p { margin: 0; }
 .form-grid label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.form-grid .form-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  padding-top: 6px;
+  background: #fff;
+}
 
 .password-box {
   display: grid;
@@ -367,6 +374,20 @@ input:focus, select:focus {
   .search { max-width: none; width: 100%; }
   .detail-head { flex-direction: column; }
   .stats { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+  .form-grid .form-actions {
+    position: sticky;
+    bottom: 8px;
+    margin: 0 -6px;
+    padding: 8px;
+    border-top: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 -8px 16px rgba(6, 35, 26, 0.08);
+  }
+  .form-grid .form-actions .btn {
+    flex: 1 1 0;
+    min-height: 46px;
+    font-size: 15px;
+  }
 }
 
 /* ---------- Pending approvals queue (always-visible Approve) ---------- */
