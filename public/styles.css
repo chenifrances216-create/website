@@ -635,6 +635,28 @@ h2, h3, h4 { letter-spacing: -0.3px; }
 .kv div { display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; }
 .kv div span { color: var(--muted); }
 .kv div b { text-align: right; }
+.invite-link {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  display: grid;
+  gap: 4px;
+  background: linear-gradient(135deg, rgba(232, 198, 90, 0.18), rgba(22, 160, 94, 0.1));
+  border: 1px solid rgba(232, 198, 90, 0.55);
+}
+.invite-link-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.invite-link b {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  word-break: break-all;
+  color: var(--green-deep, #0b6b3f);
+}
 
 /* ---------- Progress ---------- */
 .progress {
