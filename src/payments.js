@@ -144,6 +144,75 @@ async function fetchCharge(providerRef) {
   };
 }
 
+// ---------- Utoaji (payout) kwenda M-Pesa / Tigo Pesa ----------
+function buildTransferPayload({ amount, currency = 'TZS', account, method, reference, narration, beneficiaryName }) {
+  const network = networkFor(method);
+  if (!network) throw new PaymentError('Njia hii haitumii malipo ya simu', 400);
+  const accountNumber = localPhone(account);
+  if (!accountNumber) throw new PaymentError('Namba ya simu ya kupokea si sahihi', 400);
+  if (!reference) throw new PaymentError('Kumbukumbu ya muamala haipo', 400);
+  const value = Number(amount);
+  if (!Number.isFinite(value) || value <= 0) throw new PaymentError('Kiasi cha kutuma si sahihi', 400);
+  return {
+    account_bank: network,
+    account_number: accountNumber,
+    amount: value,
+    currency,
+    narration: String(narration || 'Ship Transfer payout').slice(0, 100),
+    reference: String(reference),
+    beneficiary_name: String(beneficiaryName || 'Ship Transfer').slice(0, 100),
+    meta: { method: String(method), network },
+  };
+}
+
+// Tuma pesa kwenye simu ya mtu (M-Pesa / Tigo Pesa / Airtel / Halo)
+async function initiateTransfer(input) {
+  const payload = buildTransferPayload(input);
+  if (!isLive()) {
+    return {
+      provider: 'sandbox',
+      providerRef: `SBX-PAYOUT-${crypto.randomBytes(6).toString('hex')}`,
+      status: 'completed',
+      message: 'Hali ya majaribio: hakuna pesa halisi iliyotumwa.',
+      sandbox: true,
+    };
+  }
+
+  const response = await request('/transfers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  const body = await readJson(response);
+  if (!response.ok || !body || body.status !== 'success' || !body.data) {
+    const reason = body && (body.message || (body.data && body.data.message));
+    throw new PaymentError(
+      String(reason || `Mtoa huduma alikataa utoaji (HTTP ${response.status})`).slice(0, 200),
+    );
+  }
+
+  return {
+    provider: 'flutterwave',
+    providerRef: String(body.data.id || ''),
+    status: String(body.data.status || 'processing'),
+    message: String(body.data.complete_message || body.data.narration || 'Ombi la utoaji limetumwa'),
+    sandbox: false,
+  };
+}
+
+// Hali ya utoaji moja kwa moja kwa mtoa huduma
+async function fetchTransfer(providerRef) {
+  if (!isLive() || !providerRef) return null;
+  const response = await request(`/transfers/${encodeURIComponent(providerRef)}`, { method: 'GET' });
+  const body = await readJson(response);
+  if (!response.ok || !body || !body.data) return null;
+  return {
+    status: String(body.data.status || ''),
+    amount: Number(body.data.amount),
+    currency: String(body.data.currency || ''),
+    raw: body.data,
+  };
+}
+
 // Webhook: mtoa huduma hutuma kichwa cha verif-hash kinacholingana na FLW_WEBHOOK_HASH
 function verifyWebhook(headerValue) {
   const expected = WEBHOOK_HASH();
@@ -164,6 +233,7 @@ function describe() {
     live: isLive(),
     provider: isLive() ? 'flutterwave' : 'sandbox',
     mobileMethods: MOBILE_METHODS,
+    payouts: true,
     webhookConfigured: Boolean(WEBHOOK_HASH()),
   };
 }
@@ -173,9 +243,12 @@ module.exports = {
   NETWORKS,
   PaymentError,
   buildChargePayload,
+  buildTransferPayload,
   describe,
   fetchCharge,
+  fetchTransfer,
   initiateCharge,
+  initiateTransfer,
   isLive,
   isMobileMethod,
   localPhone,
