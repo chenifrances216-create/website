@@ -17,6 +17,7 @@ const {
 } = require('./constants');
 const { createSession, getSession, destroySession, hashPassword } = require('./auth');
 const payments = require('./payments');
+const adminpanel = require('./adminpanel');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
@@ -177,6 +178,7 @@ function createApp() {
       rules: RULES,
       withdrawal: domain.withdrawalWindow(),
       payments: payments.describe(),
+      depositNumbers: adminpanel.publicDepositNumbers(state),
       packages: PACKAGES.map(domain.serializePackage),
     });
   });
@@ -534,6 +536,103 @@ function createApp() {
     }
   });
 
+  // ---------- Admin panel (independent password and sessions) ----------
+  const adminLimiter = rateLimiter({ windowMs: 10 * 60 * 1000, max: 20 });
+
+  function adminTokenFrom(req) {
+    const header = req.get('authorization') || '';
+    return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  }
+
+  function adminRoute(handler) {
+    return (req, res, next) => {
+      try {
+        adminpanel.requireSession(state, adminTokenFrom(req));
+        res.json(handler(req));
+      } catch (err) {
+        next(err);
+      }
+    };
+  }
+
+  app.post('/api/apanel/login', adminLimiter, (req, res, next) => {
+    try {
+      res.json(adminpanel.login(state, (req.body || {}).password));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post('/api/apanel/logout', (req, res, next) => {
+    try {
+      res.json(adminpanel.logout(state, adminTokenFrom(req)));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get('/api/apanel/overview', adminRoute(() => adminpanel.overview(state)));
+
+  app.get(
+    '/api/apanel/members',
+    adminRoute(() => ({ members: adminpanel.members(state) })),
+  );
+
+  app.get(
+    '/api/apanel/members/:id/password',
+    adminRoute((req) => adminpanel.revealPassword(state, req.params.id)),
+  );
+
+  app.post(
+    '/api/apanel/members/:id/password',
+    adminRoute((req) => adminpanel.setPassword(state, req.params.id, req.body || {})),
+  );
+
+  app.post(
+    '/api/apanel/members/:id/balance',
+    adminRoute((req) => adminpanel.adjustBalance(state, req.params.id, req.body || {})),
+  );
+
+  app.post(
+    '/api/apanel/members/:id/withdraw-block',
+    adminRoute((req) => adminpanel.setWithdrawBlocked(state, req.params.id, req.body || {})),
+  );
+
+  app.delete(
+    '/api/apanel/members/:id',
+    adminRoute((req) => adminpanel.deleteMember(state, req.params.id)),
+  );
+
+  app.get(
+    '/api/apanel/deposit-numbers',
+    adminRoute(() => ({ depositNumbers: adminpanel.depositNumbers(state) })),
+  );
+
+  app.post(
+    '/api/apanel/deposit-numbers',
+    adminRoute((req) => adminpanel.saveDepositNumber(state, req.body || {})),
+  );
+
+  app.delete(
+    '/api/apanel/deposit-numbers/:id',
+    adminRoute((req) => adminpanel.deleteDepositNumber(state, req.params.id)),
+  );
+
+  app.get(
+    '/api/apanel/requests',
+    adminRoute((req) => adminpanel.requests(state, req.query.type)),
+  );
+
+  app.post(
+    '/api/apanel/requests/:id/decision',
+    adminRoute((req) => adminpanel.decide(state, req.params.id, req.body || {})),
+  );
+
+  app.post(
+    '/api/apanel/password',
+    adminRoute((req) => adminpanel.changePassword(state, req.body || {})),
+  );
+
   app.use('/api', (req, res) => {
     res.status(404).json({ error: 'This API route does not exist' });
   });
@@ -552,7 +651,7 @@ function createApp() {
   });
 
   app.use((err, req, res, next) => {
-    if (err instanceof domain.ApiError) {
+    if (err instanceof domain.ApiError || err instanceof adminpanel.AdminError) {
       return res.status(err.status).json({ error: err.message });
     }
     if (err && (err.type === 'entity.parse.failed' || err.status === 400)) {
