@@ -8,9 +8,15 @@ const {
   MIN_WITHDRAW,
   MAX_AMOUNT,
   SIGNUP_BONUS,
-  INVITE_BONUS_INVITER,
-  INVITE_BONUS_INVITEE,
+  REFERRAL_RATE,
+  WITHDRAW_FEE_RATE,
+  WITHDRAW_OPEN_MINUTE,
+  WITHDRAW_CLOSE_MINUTE,
+  WITHDRAW_DAYS,
+  TZ_OFFSET_MINUTES,
+  TZ_LABEL,
   DAY_MS,
+  INVEST_DAYS,
   DEPOSIT_METHODS,
   WITHDRAW_METHODS,
   TXN_LABELS,
@@ -51,15 +57,68 @@ function normalizePhone(raw) {
 function assertAmount(value, label, min) {
   const amount = Number(value);
   if (!Number.isFinite(amount) || !Number.isInteger(amount)) {
-    throw new ApiError(400, `${label} lazima iwe namba kamili`);
+    throw new ApiError(400, `${label} must be a whole number`);
   }
   if (amount < min) {
-    throw new ApiError(400, `${label} lazima iwe angalau ${money(min)}`);
+    throw new ApiError(400, `${label} must be at least ${money(min)}`);
   }
   if (amount > MAX_AMOUNT) {
-    throw new ApiError(400, `${label} ni kubwa kuliko kikomo cha ${money(MAX_AMOUNT)}`);
+    throw new ApiError(400, `${label} is above the limit of ${money(MAX_AMOUNT)}`);
   }
   return amount;
+}
+
+// ---------- Capital vs profit ----------
+// user.capital = locked capital (deposits + returned capital), never withdrawable
+// user.balance = withdrawable profit balance (daily profit + bonuses)
+function capitalOf(user) {
+  return Number(user && user.capital ? user.capital : 0);
+}
+
+function profitOf(user) {
+  return Number(user && user.balance ? user.balance : 0);
+}
+
+// ---------- Business days (East Africa Time, UTC+3) ----------
+function eatParts(ts) {
+  const d = new Date(Number(ts) + TZ_OFFSET_MINUTES * 60 * 1000);
+  return { weekday: d.getUTCDay(), minutes: d.getUTCHours() * 60 + d.getUTCMinutes() };
+}
+
+function isBusinessDay(ts) {
+  return WITHDRAW_DAYS.includes(eatParts(ts).weekday);
+}
+
+function withdrawalWindow(now = Date.now()) {
+  const { weekday, minutes } = eatParts(now);
+  const weekdayOpen = WITHDRAW_DAYS.includes(weekday);
+  const timeOpen = minutes >= WITHDRAW_OPEN_MINUTE && minutes < WITHDRAW_CLOSE_MINUTE;
+  let message = 'Withdrawals are open.';
+  if (!weekdayOpen) message = 'Withdrawals are closed on Saturday and Sunday.';
+  else if (minutes < WITHDRAW_OPEN_MINUTE) message = 'Withdrawals open at 10:00 EAT.';
+  else if (minutes >= WITHDRAW_CLOSE_MINUTE) message = 'Withdrawals close at 17:00 EAT.';
+  return {
+    open: weekdayOpen && timeOpen,
+    weekdayOpen,
+    timeOpen,
+    weekday,
+    days: 'Monday - Friday',
+    openAt: '10:00',
+    closeAt: '17:00',
+    timezone: TZ_LABEL,
+    message,
+  };
+}
+
+function withdrawFee(amount) {
+  return Math.round(Number(amount || 0) * WITHDRAW_FEE_RATE);
+}
+
+function netOf(txn) {
+  if (!txn) return 0;
+  const meta = txn.meta || {};
+  if (Number.isFinite(meta.net)) return Number(meta.net);
+  return Math.max(0, txn.amount - withdrawFee(txn.amount));
 }
 
 function addTxn(state, { userId, type, amount, status = 'completed', method = null, note = null, meta = null }) {
@@ -95,39 +154,73 @@ function packageById(id) {
 
 function serializePackage(pkg) {
   return {
-    ...pkg,
-    dailyProfitAtMin: Math.round(pkg.min * pkg.dailyRate),
-    totalProfitAtMin: Math.round(pkg.min * pkg.dailyRate) * pkg.days,
-    totalReturnAtMin: pkg.min + Math.round(pkg.min * pkg.dailyRate) * pkg.days,
+    id: pkg.id,
+    name: pkg.name,
+    level: pkg.level,
+    shipName: pkg.shipName,
+    image: pkg.image,
+    tag: pkg.tag,
+    capital: pkg.capital,
+    min: pkg.min,
+    max: pkg.max,
+    dailyProfit: pkg.dailyProfit,
+    dailyRate: pkg.dailyRate,
+    days: pkg.days,
+    perks: pkg.perks,
+    monthlyProfit: pkg.dailyProfit * pkg.days,
   };
+}
+
+// Profit is credited 24h after renting, business days only (no Sat/Sun)
+function eligibleProfitDays(inv, now) {
+  const start = new Date(inv.startAt).getTime();
+  const periods = Math.floor((now - start) / DAY_MS);
+  const maxDays = inv.days || INVEST_DAYS;
+  let counted = 0;
+  for (let n = 1; n <= periods && counted < maxDays; n += 1) {
+    if (isBusinessDay(start + n * DAY_MS)) counted += 1;
+  }
+  return counted;
+}
+
+function nextPayoutAt(inv) {
+  if (!inv || inv.status !== 'active') return null;
+  const start = new Date(inv.startAt).getTime();
+  const now = Date.now();
+  let n = Math.max(1, Math.floor((now - start) / DAY_MS) + 1);
+  for (let i = 0; i < 20; i += 1) {
+    const at = start + n * DAY_MS;
+    if (isBusinessDay(at)) return new Date(at).toISOString();
+    n += 1;
+  }
+  return null;
 }
 
 function accrue(state, user, now = Date.now()) {
   let changed = false;
   for (const inv of state.investments) {
     if (inv.userId !== user.id || inv.status !== 'active') continue;
-    const startAt = new Date(inv.startAt).getTime();
-    const elapsedDays = Math.floor((now - startAt) / DAY_MS);
-    const daysPaidTarget = Math.max(0, Math.min(elapsedDays, inv.days));
-    if (daysPaidTarget > inv.daysPaid) {
-      const newDays = daysPaidTarget - inv.daysPaid;
+    const target = Math.min(eligibleProfitDays(inv, now), inv.days || INVEST_DAYS);
+    if (target > inv.daysPaid) {
+      const newDays = target - inv.daysPaid;
       const profit = newDays * inv.dailyProfit;
-      inv.daysPaid = daysPaidTarget;
+      inv.daysPaid = target;
       inv.earned = (inv.earned || 0) + profit;
       inv.lastAccruedAt = new Date(now).toISOString();
       if (profit > 0) {
-        user.balance += profit;
+        user.balance = profitOf(user) + profit;
         addTxn(state, {
           userId: user.id,
           type: 'profit',
           amount: profit,
-          note: `Faida ya ${inv.packageName} - siku ${newDays}`,
+          note: `${inv.packageName} · ${inv.shipName} profit for ${newDays} business day${newDays === 1 ? '' : 's'}`,
           meta: { investmentId: inv.id },
         });
       }
-      if (inv.daysPaid >= inv.days) {
+      if (inv.daysPaid >= (inv.days || INVEST_DAYS)) {
         inv.status = 'completed';
         inv.completedAt = new Date(now).toISOString();
+        user.capital = capitalOf(user) + inv.amount;
       }
       changed = true;
     }
@@ -141,6 +234,7 @@ function publicUser(state, user) {
   const sum = (type) => completed.filter((t) => t.type === type).reduce((acc, t) => acc + t.amount, 0);
   const active = state.investments.filter((i) => i.userId === user.id && i.status === 'active');
   const pending = txns.filter((t) => t.status === 'pending');
+  const window = withdrawalWindow();
   return {
     id: user.id,
     name: user.name,
@@ -148,43 +242,68 @@ function publicUser(state, user) {
     phone: user.phone,
     role: user.role,
     vipLevel: user.vipLevel || 0,
-    balance: user.balance,
+    balance: profitOf(user),
+    capital: capitalOf(user),
+    withdrawable: profitOf(user),
+    lockedCapital: active.reduce((acc, i) => acc + i.amount, 0),
     referralCode: user.referralCode,
     createdAt: user.createdAt,
     totalDeposit: sum('deposit'),
-    totalWithdraw: sum('withdraw'),
-    totalInvested: sum('invest'),
+    totalWithdraw: completed
+      .filter((t) => t.type === 'withdraw')
+      .reduce((acc, t) => acc + netOf(t), 0),
     totalProfit: sum('profit'),
+    totalInvested: sum('invest'),
     totalBonus: sum('signup_bonus') + sum('invite_bonus'),
     activeInvestments: active.length,
     activeCapital: active.reduce((acc, i) => acc + i.amount, 0),
     pendingCount: pending.length,
+    withdrawal: window,
   };
+}
+
+// 10% of the invited member's first deposit, credited automatically
+function creditReferral(state, user, depositAmount) {
+  if (!user.referredBy || user.referralPaid) return null;
+  const referrer = state.users.find((u) => u.id === user.referredBy);
+  if (!referrer) return null;
+  const bonus = Math.round(Number(depositAmount || 0) * REFERRAL_RATE);
+  if (bonus <= 0) return null;
+  user.referralPaid = true;
+  referrer.balance = profitOf(referrer) + bonus;
+  addTxn(state, {
+    userId: referrer.id,
+    type: 'invite_bonus',
+    amount: bonus,
+    note: `${Math.round(REFERRAL_RATE * 100)}% referral bonus from ${user.name}'s first deposit`,
+    meta: { invitedUserId: user.id, rate: REFERRAL_RATE, deposit: depositAmount },
+  });
+  return bonus;
 }
 
 function register(state, input) {
   const name = String(input.name || '').trim();
   if (name.length < 2 || name.length > 60) {
-    throw new ApiError(400, 'Jina linahitajika (herufi 2 hadi 60)');
+    throw new ApiError(400, 'Name is required (2 to 60 characters)');
   }
   const email = String(input.email || '').trim().toLowerCase();
-  if (!EMAIL_RE.test(email)) throw new ApiError(400, 'Barua pepe si sahihi');
+  if (!EMAIL_RE.test(email)) throw new ApiError(400, 'Enter a valid email address');
 
   const phone = normalizePhone(input.phone);
-  if (!phone) throw new ApiError(400, 'Namba ya simu si sahihi (mfano 0712 345 678)');
+  if (!phone) throw new ApiError(400, 'Enter a valid phone number (e.g. 0712 345 678)');
 
   const password = String(input.password || '');
-  if (password.length < 6) throw new ApiError(400, 'Neno la siri linahitaji herufi 6 au zaidi');
-  if (password.length > 100) throw new ApiError(400, 'Neno la siri ni refu mno');
+  if (password.length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
+  if (password.length > 100) throw new ApiError(400, 'Password is too long');
 
-  if (state.users.some((u) => u.email === email)) throw new ApiError(409, 'Barua pepe hii imetumika');
-  if (state.users.some((u) => u.phone === phone)) throw new ApiError(409, 'Namba hii ya simu imetumika');
+  if (state.users.some((u) => u.email === email)) throw new ApiError(409, 'This email is already registered');
+  if (state.users.some((u) => u.phone === phone)) throw new ApiError(409, 'This phone number is already registered');
 
   let referrer = null;
   const code = String(input.inviteCode || '').trim().toUpperCase();
   if (code) {
     referrer = state.users.find((u) => u.referralCode === code) || null;
-    if (!referrer) throw new ApiError(400, 'Kodi ya mwaliko haipo');
+    if (!referrer) throw new ApiError(400, 'Invite code not found');
   }
 
   const user = {
@@ -195,78 +314,61 @@ function register(state, input) {
     passwordHash: hashPassword(password),
     referralCode: uniqueReferralCode(state),
     referredBy: referrer ? referrer.id : null,
+    referralPaid: false,
     role: 'user',
     vipLevel: 0,
     balance: 0,
+    capital: 0,
     createdAt: nowIso(),
   };
   state.users.push(user);
 
-  user.balance += SIGNUP_BONUS;
+  user.balance = profitOf(user) + SIGNUP_BONUS;
   addTxn(state, {
     userId: user.id,
     type: 'signup_bonus',
     amount: SIGNUP_BONUS,
-    note: 'Bonasi ya kukaribisha Ship Transfer',
+    note: 'Welcome bonus for joining Ship Transfer',
   });
-
-  if (referrer) {
-    referrer.balance += INVITE_BONUS_INVITER;
-    addTxn(state, {
-      userId: referrer.id,
-      type: 'invite_bonus',
-      amount: INVITE_BONUS_INVITER,
-      note: `Bonasi ya mwaliko: ${name}`,
-      meta: { invitedUserId: user.id },
-    });
-    user.balance += INVITE_BONUS_INVITEE;
-    addTxn(state, {
-      userId: user.id,
-      type: 'invite_bonus',
-      amount: INVITE_BONUS_INVITEE,
-      note: `Bonasi ya mwaliko kutoka kwa ${referrer.name}`,
-      meta: { referrerId: referrer.id },
-    });
-  }
 
   return user;
 }
 
 function login(state, input) {
   const identifier = String(input.email || '').trim().toLowerCase();
-  if (!identifier) throw new ApiError(400, 'Weka barua pepe au namba ya simu');
+  if (!identifier) throw new ApiError(400, 'Enter your email or phone number');
   const phone = normalizePhone(identifier);
   const user = state.users.find((u) => u.email === identifier || (phone && u.phone === phone));
   const password = String(input.password || '');
   if (!user || !verifyPassword(password, user.passwordHash)) {
-    throw new ApiError(401, 'Taarifa za kuingia si sahihi');
+    throw new ApiError(401, 'Incorrect login details');
   }
   return user;
 }
 
 function changePassword(state, user, input) {
   if (!verifyPassword(String(input.currentPassword || ''), user.passwordHash)) {
-    throw new ApiError(400, 'Neno la siri la sasa si sahihi');
+    throw new ApiError(400, 'Current password is incorrect');
   }
   const next = String(input.newPassword || '');
-  if (next.length < 6) throw new ApiError(400, 'Neno la siri jipya linahitaji herufi 6 au zaidi');
+  if (next.length < 6) throw new ApiError(400, 'New password must be at least 6 characters');
   user.passwordHash = hashPassword(next);
   destroyUserSessions(state, user.id);
   return user;
 }
 
 function createDeposit(state, user, input) {
-  const amount = assertAmount(input.amount, 'Kiasi cha amana', MIN_DEPOSIT);
+  const amount = assertAmount(input.amount, 'Deposit amount', MIN_DEPOSIT);
   const method = String(input.method || '').trim();
   if (!DEPOSIT_METHODS.some((m) => m.id === method)) {
-    throw new ApiError(400, 'Chagua njia ya malipo sahihi');
+    throw new ApiError(400, 'Choose a valid payment method');
   }
   const reference = String(input.reference || '').trim().slice(0, 60);
   const mobile = payments.isMobileMethod(method);
   let phone = null;
   if (mobile) {
     phone = normalizePhone(input.phone || user.phone);
-    if (!phone) throw new ApiError(400, 'Weka namba ya simu sahihi ya kulipia');
+    if (!phone) throw new ApiError(400, 'Enter a valid phone number to pay with');
   }
   return addTxn(state, {
     userId: user.id,
@@ -274,7 +376,7 @@ function createDeposit(state, user, input) {
     amount,
     status: 'pending',
     method,
-    note: mobile ? `Amana kupitia ${method} (malipo ya simu)` : `Amana kupitia ${method}`,
+    note: mobile ? `Deposit via ${method} (mobile money)` : `Deposit via ${method}`,
     meta: {
       reference,
       phone,
@@ -304,26 +406,26 @@ function failDeposit(state, txn, reason) {
   if (!txn || txn.status !== 'pending') return txn;
   txn.status = 'failed';
   txn.decidedAt = nowIso();
-  txn.meta = { ...(txn.meta || {}), error: String(reason || 'Malipo hayakufanikiwa').slice(0, 200) };
+  txn.meta = { ...(txn.meta || {}), error: String(reason || 'Payment failed').slice(0, 200) };
   return txn;
 }
 
-// Hukamilisha amana mara moja tu (idempotent) na kuongeza salio
+// Deposits fund locked capital; completes only once (idempotent)
 function completeDeposit(state, txn, info = {}) {
-  if (!txn) throw new ApiError(404, 'Amana haipo');
-  if (txn.type !== 'deposit') throw new ApiError(400, 'Muamala huu si amana');
+  if (!txn) throw new ApiError(404, 'Deposit not found');
+  if (txn.type !== 'deposit') throw new ApiError(400, 'This transaction is not a deposit');
   const user = state.users.find((u) => u.id === txn.userId);
-  if (!user) throw new ApiError(404, 'Mtumiaji halipo');
+  if (!user) throw new ApiError(404, 'User not found');
   if (txn.status === 'completed') return { credited: false, txn, user };
-  if (txn.status !== 'pending') throw new ApiError(400, 'Muamala huu hauwezi kuthibitishwa');
+  if (txn.status !== 'pending') throw new ApiError(400, 'This deposit cannot be confirmed');
 
   const paid = info.amount == null ? null : Number(info.amount);
   if (paid != null && Number.isFinite(paid) && paid !== txn.amount) {
     txn.meta = { ...(txn.meta || {}), amountMismatch: paid };
-    throw new ApiError(409, 'Kiasi kilicholipwa hakiendani na ombi. Msimamizi atahakiki.');
+    throw new ApiError(409, 'The amount paid does not match the request. An admin will review it.');
   }
   if (info.currency && String(info.currency).toUpperCase() !== 'TZS') {
-    throw new ApiError(400, 'Sarafu ya malipo si sahihi');
+    throw new ApiError(400, 'Payment currency is not supported');
   }
 
   txn.status = 'completed';
@@ -335,8 +437,9 @@ function completeDeposit(state, txn, info = {}) {
     confirmedBy: info.source || 'provider',
     paidAmount: paid != null ? paid : txn.amount,
   };
-  user.balance += txn.amount;
-  return { credited: true, txn, user };
+  user.capital = capitalOf(user) + txn.amount;
+  const referral = creditReferral(state, user, txn.amount);
+  return { credited: true, txn, user, referral };
 }
 
 function findDeposit(state, userId, id) {
@@ -347,22 +450,47 @@ function findDepositByRef(state, txRef) {
   return state.transactions.find((t) => t.id === txRef && t.type === 'deposit') || null;
 }
 
+// Withdrawals: profit only, min 3,000, 10% fee, Mon-Fri 10:00-17:00 EAT
 function createWithdraw(state, user, input) {
-  const amount = assertAmount(input.amount, 'Kiasi cha utoaji', MIN_WITHDRAW);
+  const amount = assertAmount(input.amount, 'Withdrawal amount', MIN_WITHDRAW);
+  const window = withdrawalWindow();
+  if (!window.open) {
+    throw new ApiError(
+      400,
+      `${window.message} Withdrawals run Monday - Friday, 10:00 to 17:00 EAT.`,
+    );
+  }
   const method = String(input.method || '').trim();
-  if (!WITHDRAW_METHODS.includes(method)) throw new ApiError(400, 'Chagua njia ya kupokea pesa');
+  if (!WITHDRAW_METHODS.includes(method)) throw new ApiError(400, 'Choose a valid payout method');
   const account = String(input.account || '').trim();
-  if (account.length < 5) throw new ApiError(400, 'Weka namba ya simu au akaunti ya kupokea');
-  if (user.balance < amount) throw new ApiError(400, `Salio halitoshi. Unayo ${money(user.balance)}`);
-  user.balance -= amount;
+  if (account.length < 5) throw new ApiError(400, 'Enter the phone number or account that will receive the money');
+
+  const available = profitOf(user);
+  if (available < amount) {
+    throw new ApiError(
+      400,
+      `Profit balance is not enough. Available profit: ${money(available)}. Capital cannot be withdrawn.`,
+    );
+  }
+
+  const fee = withdrawFee(amount);
+  const net = amount - fee;
+  user.balance = available - amount;
   return addTxn(state, {
     userId: user.id,
     type: 'withdraw',
     amount,
     status: 'pending',
     method,
-    note: `Utoaji kupitia ${method}`,
-    meta: { account: account.slice(0, 40) },
+    note: `Withdrawal via ${method}`,
+    meta: {
+      account: account.slice(0, 40),
+      gross: amount,
+      fee,
+      net,
+      feeRate: WITHDRAW_FEE_RATE,
+      requestedAt: nowIso(),
+    },
   });
 }
 
@@ -376,13 +504,13 @@ function findWithdrawByRef(state, reference) {
   return state.transactions.find((t) => t.id === reference && t.type === 'withdraw') || null;
 }
 
-// Anzisha utoaji wa kiotomatiki (payout) kwa mtandao wa simu
+// Start the automatic payout (mobile money)
 function startPayout(state, txn, info = {}) {
-  if (!txn) throw new ApiError(404, 'Ombi halipo');
-  if (txn.type !== 'withdraw') throw new ApiError(400, 'Ombi hili si la utoaji');
-  if (txn.status !== 'pending') throw new ApiError(400, 'Ombi hili tayari limeshughulikiwa');
+  if (!txn) throw new ApiError(404, 'Request not found');
+  if (txn.type !== 'withdraw') throw new ApiError(400, 'This request is not a withdrawal');
+  if (txn.status !== 'pending') throw new ApiError(400, 'This request has already been handled');
   const user = state.users.find((u) => u.id === txn.userId);
-  if (!user) throw new ApiError(404, 'Mtumiaji halipo');
+  if (!user) throw new ApiError(404, 'User not found');
   txn.status = 'processing';
   txn.meta = {
     ...(txn.meta || {}),
@@ -397,13 +525,13 @@ function startPayout(state, txn, info = {}) {
   return { txn, user };
 }
 
-// Kamilisha utoaji: hulipia mtu mara moja tu hata webhook irudi tena
+// Pays the beneficiary once only, even if a webhook repeats
 function completePayout(state, txn, info = {}) {
-  if (!txn) throw new ApiError(404, 'Ombi halipo');
+  if (!txn) throw new ApiError(404, 'Request not found');
   const user = state.users.find((u) => u.id === txn.userId);
-  if (!user) throw new ApiError(404, 'Mtumiaji halipo');
+  if (!user) throw new ApiError(404, 'User not found');
   if (txn.status === 'completed') return { paid: false, txn, user };
-  if (txn.status === 'rejected') throw new ApiError(400, 'Ombi limekataliwa');
+  if (txn.status === 'rejected') throw new ApiError(400, 'This request was rejected');
   txn.status = 'completed';
   txn.decidedAt = nowIso();
   txn.meta = {
@@ -413,38 +541,47 @@ function completePayout(state, txn, info = {}) {
     paidAt: nowIso(),
     paidBy: info.source || 'provider',
   };
-  user.paidOut = (user.paidOut || 0) + txn.amount;
+  user.paidOut = (user.paidOut || 0) + netOf(txn);
   return { paid: true, txn, user };
 }
 
-// Utoaji umeshindikana: ombi linarudi kwenye foleni ili msimamizi ajaribu tena
+// Payout failed: the request returns to the queue so the admin can retry
 function failPayout(state, txn, reason) {
   if (!txn || txn.status !== 'processing') return txn;
   txn.status = 'pending';
   txn.meta = {
     ...(txn.meta || {}),
     payoutStatus: 'failed',
-    error: String(reason || 'Utoaji haukufanikiwa').slice(0, 160),
+    error: String(reason || 'The payout did not go through').slice(0, 160),
   };
   return txn;
 }
 
+// Renting a ship uses locked capital only; the level requires its exact capital
 function createInvestment(state, user, input) {
   const pkg = packageById(input.packageId);
-  if (!pkg) throw new ApiError(400, 'Kifurushi cha VIP hakipo');
-  const amount = assertAmount(input.amount, 'Kiasi cha uwekezaji', pkg.min);
-  if (amount > pkg.max) {
-    throw new ApiError(400, `${pkg.name} inakubali hadi ${money(pkg.max)}. Chagua kifurushi cha juu.`);
+  if (!pkg) throw new ApiError(400, 'That ship level does not exist');
+  const amount = assertAmount(input.amount, 'Capital', pkg.capital);
+  if (amount !== pkg.capital) {
+    throw new ApiError(400, `${pkg.name} requires exactly ${money(pkg.capital)} of capital`);
   }
-  if (user.balance < amount) throw new ApiError(400, `Salio halitoshi. Unayo ${money(user.balance)}`);
+  const available = capitalOf(user);
+  if (available < amount) {
+    throw new ApiError(
+      400,
+      `Capital balance is not enough. Available capital: ${money(available)}. Profit cannot be used to rent a ship.`,
+    );
+  }
 
-  user.balance -= amount;
-  const dailyProfit = Math.round(amount * pkg.dailyRate);
+  user.capital = available - amount;
+  const dailyProfit = pkg.dailyProfit;
   const investment = {
     id: db.newId(),
     userId: user.id,
     packageId: pkg.id,
     packageName: pkg.name,
+    shipName: pkg.shipName,
+    image: pkg.image,
     amount,
     dailyRate: pkg.dailyRate,
     dailyProfit,
@@ -461,28 +598,31 @@ function createInvestment(state, user, input) {
     userId: user.id,
     type: 'invest',
     amount,
-    note: `Uwekezaji ${pkg.name} - faida ${money(dailyProfit)} kwa siku`,
-    meta: { investmentId: investment.id },
+    note: `Rented ${pkg.shipName} (${pkg.name}) · ${money(dailyProfit)} profit per business day`,
+    meta: { investmentId: investment.id, packageId: pkg.id },
   });
   return investment;
 }
 
 function decideRequest(state, txnId, action, note) {
   const txn = state.transactions.find((t) => t.id === txnId);
-  if (!txn) throw new ApiError(404, 'Ombi halipo');
-  if (txn.status !== 'pending') throw new ApiError(400, 'Ombi hili tayari limeshughulikiwa');
+  if (!txn) throw new ApiError(404, 'Request not found');
+  if (txn.status !== 'pending') throw new ApiError(400, 'This request has already been handled');
   const user = state.users.find((u) => u.id === txn.userId);
-  if (!user) throw new ApiError(404, 'Mtumiaji halipo');
+  if (!user) throw new ApiError(404, 'User not found');
 
   if (action === 'approve') {
     txn.status = 'completed';
-    if (txn.type === 'deposit') user.balance += txn.amount;
-    if (txn.type === 'withdraw') user.paidOut = (user.paidOut || 0) + txn.amount;
+    if (txn.type === 'deposit') {
+      user.capital = capitalOf(user) + txn.amount;
+      creditReferral(state, user, txn.amount);
+    }
+    if (txn.type === 'withdraw') user.paidOut = (user.paidOut || 0) + netOf(txn);
   } else if (action === 'reject') {
     txn.status = 'rejected';
-    if (txn.type === 'withdraw') user.balance += txn.amount;
+    if (txn.type === 'withdraw') user.balance = profitOf(user) + txn.amount;
   } else {
-    throw new ApiError(400, 'Kitendo si sahihi');
+    throw new ApiError(400, 'Invalid action');
   }
   txn.decidedAt = nowIso();
   txn.adminNote = note ? String(note).slice(0, 120) : null;
@@ -490,6 +630,7 @@ function decideRequest(state, txnId, action, note) {
 }
 
 function serializeTxn(txn) {
+  const meta = txn.meta || {};
   return {
     id: txn.id,
     type: txn.type,
@@ -498,15 +639,18 @@ function serializeTxn(txn) {
     status: txn.status,
     method: txn.method,
     note: txn.note,
-    reference: txn.meta && txn.meta.reference ? txn.meta.reference : null,
-    channel: (txn.meta && txn.meta.channel) || 'manual',
-    phone: (txn.meta && txn.meta.phone) || null,
-    provider: (txn.meta && txn.meta.provider) || null,
-    providerRef: (txn.meta && txn.meta.providerRef) || null,
-    paymentStatus: (txn.meta && txn.meta.paymentStatus) || null,
-    payoutStatus: (txn.meta && txn.meta.payoutStatus) || null,
-    sandbox: Boolean(txn.meta && txn.meta.sandbox),
-    failureReason: (txn.meta && txn.meta.error) || null,
+    reference: meta.reference ? meta.reference : null,
+    channel: meta.channel || 'manual',
+    phone: meta.phone || null,
+    account: meta.account || null,
+    fee: Number.isFinite(meta.fee) ? meta.fee : txn.type === 'withdraw' ? withdrawFee(txn.amount) : 0,
+    net: txn.type === 'withdraw' ? netOf(txn) : txn.amount,
+    provider: meta.provider || null,
+    providerRef: meta.providerRef || null,
+    paymentStatus: meta.paymentStatus || null,
+    payoutStatus: meta.payoutStatus || null,
+    sandbox: Boolean(meta.sandbox),
+    failureReason: meta.error || null,
     adminNote: txn.adminNote || null,
     createdAt: txn.createdAt,
     decidedAt: txn.decidedAt || null,
@@ -514,21 +658,29 @@ function serializeTxn(txn) {
 }
 
 function serializeInvestment(inv) {
-  const elapsed = Math.max(0, Math.floor((Date.now() - new Date(inv.startAt).getTime()) / DAY_MS));
+  const start = new Date(inv.startAt).getTime();
+  const elapsed = Math.max(0, Math.floor((Date.now() - start) / DAY_MS));
+  const days = inv.days || INVEST_DAYS;
+  const daysPaid = inv.daysPaid || 0;
   return {
     id: inv.id,
     packageId: inv.packageId,
     packageName: inv.packageName,
+    shipName: inv.shipName || inv.packageName,
+    image: inv.image || null,
     amount: inv.amount,
     dailyProfit: inv.dailyProfit,
-    days: inv.days,
-    daysPaid: inv.daysPaid,
-    daysElapsed: Math.min(elapsed, inv.days),
+    days,
+    daysPaid,
+    daysElapsed: Math.min(elapsed, days),
+    daysRemaining: Math.max(0, days - daysPaid),
     earned: inv.earned || 0,
-    projectedTotal: inv.dailyProfit * inv.days,
+    projectedTotal: inv.dailyProfit * days,
     startAt: inv.startAt,
+    firstPayoutAt: new Date(start + DAY_MS).toISOString(),
+    nextPayoutAt: nextPayoutAt(inv),
     status: inv.status,
-    progress: Math.round((inv.daysPaid / inv.days) * 100),
+    progress: Math.round((daysPaid / days) * 100),
   };
 }
 
@@ -541,11 +693,12 @@ function inviteSummary(state, user) {
     code: user.referralCode,
     totalInvited: invited.length,
     totalEarned: earned,
-    bonusPerFriend: INVITE_BONUS_INVITER,
+    bonusRate: REFERRAL_RATE,
+    bonusPercent: Math.round(REFERRAL_RATE * 100),
     invited: invited
       .slice()
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .map((u) => ({ name: u.name, joinedAt: u.createdAt, vipLevel: u.vipLevel || 0 })),
+      .map((u) => ({ name: u.name, joinedAt: u.createdAt, vipLevel: u.vipLevel || 0, rewarded: Boolean(u.referralPaid) })),
   };
 }
 
@@ -554,29 +707,38 @@ module.exports = {
   accrue,
   addTxn,
   attachPayment,
+  capitalOf,
   changePassword,
   completeDeposit,
   completePayout,
   createDeposit,
+  createInvestment,
   createWithdraw,
+  creditReferral,
   decideRequest,
+  eligibleProfitDays,
   failDeposit,
   failPayout,
   findDeposit,
   findDepositByRef,
   findWithdraw,
   findWithdrawByRef,
-  startPayout,
-  createInvestment,
   inviteSummary,
+  isBusinessDay,
   login,
   money,
+  netOf,
+  nextPayoutAt,
   normalizePhone,
   packageById,
+  profitOf,
   publicUser,
   register,
   serializeInvestment,
   serializePackage,
   serializeTxn,
+  startPayout,
   uniqueReferralCode,
+  withdrawFee,
+  withdrawalWindow,
 };

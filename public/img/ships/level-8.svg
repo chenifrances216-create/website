@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360" width="640" height="360" role="img" aria-label="Cargo ship illustration level 8">
+  <defs>
+    <linearGradient id="sky8" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f1f9f5"/>
+      <stop offset="100%" stop-color="#c6e7d6"/>
+    </linearGradient>
+    <linearGradient id="sea8" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e7f56"/>
+      <stop offset="100%" stop-color="#0a4a30"/>
+    </linearGradient>
+    <linearGradient id="hull8" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#157049"/>
+      <stop offset="100%" stop-color="#0d5434"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#sky8)"/>
+  <circle cx="520" cy="78" r="42" fill="#cfae2f" opacity="0.35"/>
+  <circle cx="520" cy="78" r="26" fill="#cfae2f" opacity="0.55"/>
+  <path d="M0 262 Q160 240 320 262 T640 262 L640 360 L0 360 Z" fill="url(#sea8)"/>
+  <path d="M0 288 Q120 272 240 288 T480 288 T720 288" stroke="#ffffff" stroke-opacity="0.25" stroke-width="3" fill="none"/>
+  <path d="M0 322 Q140 306 280 322 T560 322 T840 322" stroke="#ffffff" stroke-opacity="0.16" stroke-width="3" fill="none"/>
+  <g>
+    <path d="M96 214 L536 214 L506 276 Q300 296 126 276 Z" fill="url(#hull8)"/>
+    <path d="M96 214 L536 214 L532 224 L100 224 Z" fill="#cfae2f"/>
+    <rect x="150" y="208" width="300" height="6" rx="3" fill="#ffffff" opacity="0.18"/>
+    <g>
+    <rect x="158" y="184" width="96" height="26" rx="6" fill="#ffffff" opacity="0.9"/>
+    <rect x="166" y="188" width="80" height="8" rx="3" fill="#27a26c" opacity="0.7"/>
+    <rect x="166" y="200" width="80" height="8" rx="3" fill="#27a26c" opacity="0.45"/>
+    <rect x="268" y="176" width="26" height="34" rx="5" fill="#ffffff" opacity="0.92"/>
+    <rect x="274" y="182" width="14" height="10" rx="2" fill="#157049" opacity="0.6"/>
+  </g>
+    <rect x="440" y="140" width="52" height="74" rx="6" fill="#ffffff"/>
+    <rect x="450" y="150" width="32" height="16" rx="3" fill="#157049" opacity="0.55"/>
+    <rect x="450" y="172" width="32" height="16" rx="3" fill="#157049" opacity="0.35"/>
+    <rect x="452" y="122" width="28" height="20" rx="4" fill="#0d5434"/>
+    <rect x="458" y="114" width="16" height="10" rx="3" fill="#cfae2f"/>
+    <path d="M474 118 q18 -12 34 -6" stroke="#ffffff" stroke-opacity="0.55" stroke-width="5" fill="none" stroke-linecap="round"/>
+    <circle cx="176" cy="218" r="7" fill="#cfae2f"/>
+    <circle cx="216" cy="218" r="7" fill="#cfae2f"/>
+    <circle cx="256" cy="218" r="7" fill="#cfae2f"/>
+  </g>
+  <path d="M60 300 q40 -14 80 0" stroke="#ffffff" stroke-opacity="0.5" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M470 314 q46 -16 92 0" stroke="#ffffff" stroke-opacity="0.4" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <text x="32" y="44" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700" fill="#0d5434" opacity="0.75">SHIP TRANSFER</text>
+  <text x="32" y="66" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="600" fill="#0d5434" opacity="0.55">LEVEL 8</text>
+</svg>
