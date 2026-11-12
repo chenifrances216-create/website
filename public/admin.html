@@ -47,6 +47,15 @@
 
     <div id="stats" class="stats"></div>
 
+    <section id="queue-card" class="queue-card" hidden>
+      <div class="queue-head">
+        <h2>Pending approvals</h2>
+        <span id="queue-count" class="muted tiny"></span>
+      </div>
+      <p class="muted tiny">Approve or reject each request below. Approving a deposit adds the capital; approving a withdrawal pays the member.</p>
+      <div id="pending-queue" class="queue"></div>
+    </section>
+
     <nav class="tabs" id="tabs">
       <button class="tab active" data-tab="members" type="button">Members</button>
       <button class="tab" data-tab="deposits" type="button">Deposits</button>
