@@ -391,20 +391,32 @@
     const form = event.currentTarget;
     const button = form.querySelector('button[type=submit]');
     button.disabled = true;
+    hideDepositWait();
     try {
       const data = await api('/deposit', {
         method: 'POST',
         body: {
           amount: Number(form.amount.value),
           method: form.method.value,
-          reference: form.reference.value.trim(),
+          phone: form.phone ? form.phone.value.trim() : '',
+          reference: form.reference ? form.reference.value.trim() : '',
         },
       });
-      form.reset();
       app.user = data.user;
       await refresh();
-      toast('Ombi la amana limewasilishwa. Linasubiri uthibitisho.', 'ok');
-      switchView('history');
+      const payment = data.payment || {};
+      if (payment.status === 'manual') {
+        form.reset();
+        updateDepositMethod();
+        toast('Ombi la amana limewasilishwa. Linasubiri uthibitisho wa msimamizi.', 'ok');
+        switchView('history');
+        return;
+      }
+      app.pendingDepositId = data.transaction.id;
+      form.amount.value = '';
+      showDepositWait(payment);
+      startDepositPolling();
+      toast('Ombi la malipo limetumwa kwenye simu yako.', 'ok');
     } catch (err) {
       toast(err.message, 'error');
     } finally {
@@ -574,22 +586,150 @@
   function fillMethodSelects() {
     const config = app.config;
     if (!config) return;
-    const depositSelect = $('#deposit-method');
     const withdrawSelect = $('#withdraw-method');
-    depositSelect.innerHTML = config.depositMethods
-      .map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`)
-      .join('');
     withdrawSelect.innerHTML = config.withdrawMethods
       .map((m) => `<option value="${esc(m)}">${esc(m)}</option>`)
       .join('');
-    updateDepositAccount();
-    depositSelect.addEventListener('change', updateDepositAccount);
+    renderPayMethods();
   }
 
-  function updateDepositAccount() {
-    const selected = $('#deposit-method').value;
-    const method = (app.config ? app.config.depositMethods : []).find((m) => m.id === selected);
-    if (method) $('#deposit-account').textContent = method.account;
+  /* ---------------- Malipo ya simu (M-Pesa / Tigo Pesa) ---------------- */
+  function paymentInfo() {
+    return (app.config && app.config.payments) || { mode: 'sandbox', mobileMethods: [] };
+  }
+
+  function isMobileMethod(method) {
+    return (paymentInfo().mobileMethods || []).includes(method);
+  }
+
+  function renderPayMethods() {
+    const wrap = $('#pay-methods');
+    if (!wrap) return;
+    const methods = (app.config && app.config.depositMethods) || [];
+    wrap.innerHTML = methods
+      .map((m) => {
+        const mobile = isMobileMethod(m.id);
+        return `<button type="button" class="pay-method" role="radio" aria-checked="false" data-pay-method="${esc(m.id)}">
+          <span class="pay-method__name">${esc(m.label)}</span>
+          <span class="pay-method__hint">${mobile ? 'Malipo ya simu' : 'Benki'}</span>
+        </button>`;
+      })
+      .join('');
+    updateDepositMethod();
+  }
+
+  function updateDepositMethod() {
+    const input = $('#deposit-method');
+    if (!input) return;
+    const method = input.value;
+    const mobile = isMobileMethod(method);
+    document.querySelectorAll('[data-pay-method]').forEach((btn) => {
+      const active = btn.dataset.payMethod === method;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+    const phoneField = $('#deposit-phone-field');
+    const refField = $('#deposit-reference-field');
+    const bankBox = $('#deposit-bank-box');
+    if (phoneField) phoneField.hidden = !mobile;
+    if (refField) refField.hidden = mobile;
+    if (bankBox) bankBox.hidden = mobile;
+    const info = ((app.config && app.config.depositMethods) || []).find((m) => m.id === method);
+    const account = $('#deposit-account');
+    if (info && account && !mobile) account.textContent = info.account;
+    const submit = $('#deposit-submit');
+    if (submit) submit.textContent = mobile ? `Lipa kwa ${info ? info.label : method}` : 'Tuma ombi la amana';
+    renderPayBanner();
+  }
+
+  function renderPayBanner() {
+    const banner = $('#pay-mode-banner');
+    const note = $('#deposit-live-note');
+    if (!banner) return;
+    if (paymentInfo().mode === 'live') {
+      banner.hidden = true;
+      banner.innerHTML = '';
+      if (note) note.textContent = 'Malipo halisi yamewashwa — fedha zinaingia moja kwa moja kwenye akaunti ya kampuni.';
+      return;
+    }
+    banner.hidden = false;
+    banner.innerHTML =
+      '<strong>Hali ya majaribio.</strong> Hakuna pesa halisi inayotolewa. Weka <code>FLW_SECRET_KEY</code> na <code>FLW_WEBHOOK_HASH</code> kwenye Settings → Environment variables kuwezesha M-Pesa na Tigo Pesa halisi.';
+    if (note) note.textContent = 'Malipo halisi bado hayajawashwa — tumia kitufe cha majaribio kukamilisha amana.';
+  }
+
+  function showDepositWait(payment) {
+    const box = $('#deposit-wait');
+    if (!box) return;
+    box.hidden = false;
+    $('#deposit-wait-title').textContent = 'Angalia simu yako…';
+    $('#deposit-wait-text').textContent =
+      payment.message || 'Tumekutumia ombi la malipo. Weka PIN yako kukamilisha.';
+    const sim = $('#deposit-simulate');
+    if (sim) sim.hidden = paymentInfo().mode === 'live';
+  }
+
+  function hideDepositWait() {
+    stopDepositPolling();
+    const box = $('#deposit-wait');
+    if (box) box.hidden = true;
+    const sim = $('#deposit-simulate');
+    if (sim) sim.hidden = true;
+  }
+
+  function stopDepositPolling() {
+    if (app.depositPoll) {
+      clearInterval(app.depositPoll);
+      app.depositPoll = null;
+    }
+  }
+
+  function startDepositPolling() {
+    stopDepositPolling();
+    let tries = 0;
+    app.depositPoll = setInterval(async () => {
+      tries += 1;
+      if (tries > 45) {
+        stopDepositPolling();
+        $('#deposit-wait-text').textContent = 'Bado hatujapokea uthibitisho. Angalia historia baadaye.';
+        return;
+      }
+      try {
+        const data = await api(`/deposit/${app.pendingDepositId}`);
+        app.user = data.user;
+        if (data.transaction.status === 'completed') {
+          hideDepositWait();
+          await refresh();
+          toast(`Amana ya ${tzs(data.transaction.amount)} imeingia kwenye salio lako.`, 'ok');
+          switchView('history');
+        } else if (data.transaction.status === 'failed') {
+          hideDepositWait();
+          await refresh();
+          toast(data.transaction.failureReason || 'Malipo hayakufanikiwa. Jaribu tena.', 'error');
+        }
+      } catch (err) {
+        stopDepositPolling();
+        toast(err.message, 'error');
+      }
+    }, 4000);
+  }
+
+  async function simulateDeposit() {
+    if (!app.pendingDepositId) return;
+    const btn = $('#deposit-simulate');
+    if (btn) btn.disabled = true;
+    try {
+      const data = await api(`/deposit/${app.pendingDepositId}/simulate`, { method: 'POST' });
+      app.user = data.user;
+      hideDepositWait();
+      await refresh();
+      toast(`Amana ya majaribio ya ${tzs(data.transaction.amount)} imeingia kwenye salio.`, 'ok');
+      switchView('history');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   function bindEvents() {
@@ -597,6 +737,19 @@
       const authTab = event.target.closest('[data-auth-tab]');
       if (authTab) {
         switchAuthTab(authTab.dataset.authTab);
+        return;
+      }
+
+      const payMethod = event.target.closest('[data-pay-method]');
+      if (payMethod) {
+        const input = $('#deposit-method');
+        if (input) input.value = payMethod.dataset.payMethod;
+        updateDepositMethod();
+        return;
+      }
+
+      if (event.target.closest('#deposit-simulate')) {
+        await simulateDeposit();
         return;
       }
       const go = event.target.closest('[data-go]');

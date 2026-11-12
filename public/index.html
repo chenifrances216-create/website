@@ -183,44 +183,66 @@
           <section class="view" data-view="deposit">
             <div class="view-head">
               <h2>Weka Pesa (Deposit)</h2>
-              <p>Chagua njia ya malipo, tuma kiasi, kisha thibitisha ombi lako.</p>
+              <p>Chagua M-Pesa au Tigo Pesa, weka kiasi, kisha thibitisha kwenye simu yako.</p>
             </div>
             <div class="grid-2">
               <form id="deposit-form" class="card form" novalidate>
+                <div id="pay-mode-banner" class="pay-banner" hidden></div>
+
+                <div class="field">
+                  <span>Njia ya malipo</span>
+                  <div class="pay-methods" id="pay-methods" role="radiogroup" aria-label="Njia ya malipo"></div>
+                  <input type="hidden" name="method" id="deposit-method" value="M-Pesa" />
+                </div>
+
                 <label class="field">
                   <span>Kiasi (TZS)</span>
                   <input type="number" name="amount" min="5000" step="1000" placeholder="10000" required />
                   <em id="deposit-min-hint">Kiasi cha chini: TZS 5,000</em>
                 </label>
-                <label class="field">
-                  <span>Njia ya malipo</span>
-                  <select name="method" id="deposit-method" required></select>
+
+                <label class="field" id="deposit-phone-field">
+                  <span>Namba ya simu ya kulipia</span>
+                  <input type="tel" name="phone" autocomplete="tel" placeholder="0712 345 678" />
+                  <em>Utapokea ombi la malipo kwenye simu hii — weka PIN yako kukamilisha.</em>
                 </label>
-                <label class="field">
-                  <span>Namba ya muamala / kumbukumbu <em>(si lazima)</em></span>
+
+                <label class="field" id="deposit-reference-field" hidden>
+                  <span>Namba ya muamala / kumbukumbu <em>(kwa benki)</em></span>
                   <input type="text" name="reference" maxlength="60" placeholder="Mfano: MP2400123ABCD" />
                 </label>
+
                 <div class="amount-chips" data-target="deposit-form" data-field="amount">
                   <button type="button" data-amount="10000">10,000</button>
                   <button type="button" data-amount="50000">50,000</button>
                   <button type="button" data-amount="200000">200,000</button>
                   <button type="button" data-amount="500000">500,000</button>
                 </div>
-                <button class="btn btn--primary btn--block" type="submit">Tuma ombi la amana</button>
+
+                <button class="btn btn--primary btn--block" type="submit" id="deposit-submit">Lipa kwa M-Pesa</button>
+
+                <div id="deposit-wait" class="pay-wait" hidden>
+                  <span class="spinner" aria-hidden="true"></span>
+                  <div class="pay-wait__body">
+                    <strong id="deposit-wait-title">Angalia simu yako…</strong>
+                    <p class="muted" id="deposit-wait-text">Tumekutumia ombi la malipo. Weka PIN yako kukamilisha.</p>
+                    <button type="button" class="btn btn--ghost btn--sm" id="deposit-simulate" hidden>Thibitisha malipo (majaribio)</button>
+                  </div>
+                </div>
               </form>
 
               <div class="card">
-                <h3>Maelekezo ya malipo</h3>
-                <p class="muted">Tuma kiasi kwenye akaunti ya kampuni kisha wasilisha ombi. Msimamizi atathibitisha.</p>
-                <div class="pay-box">
-                  <div class="pay-row"><span>Jina la mpokeaji</span><strong>SHIP TRANSFER LTD</strong></div>
-                  <div class="pay-row"><span>Namba ya malipo</span><strong id="deposit-account">150 456 789</strong></div>
-                </div>
+                <h3>Jinsi inavyofanya kazi</h3>
                 <ul class="bullets">
-                  <li>Amana inaingia kwenye salio baada ya uthibitisho.</li>
-                  <li>Kiasi cha chini ni TZS 5,000.</li>
-                  <li>Usitume pesa kwa mtu binafsi — tumia namba ya kampuni pekee.</li>
+                  <li><strong>M-Pesa / Tigo Pesa:</strong> ombi la malipo (USSD) linatumwa kwenye simu yako; ukiweka PIN, salio linaingia mara moja.</li>
+                  <li><strong>Benki:</strong> tuma kiasi kwenye akaunti ya kampuni kisha wasilisha ombi; msimamizi atathibitisha.</li>
+                  <li>Kiasi cha chini ni TZS 5,000. Usitume pesa kwa mtu binafsi.</li>
                 </ul>
+                <div class="pay-box" id="deposit-bank-box" hidden>
+                  <div class="pay-row"><span>Jina la mpokeaji</span><strong>SHIP TRANSFER LTD</strong></div>
+                  <div class="pay-row"><span>Namba ya akaunti</span><strong id="deposit-account">150 456 789</strong></div>
+                </div>
+                <p class="muted" id="deposit-live-note"></p>
               </div>
             </div>
           </section>
