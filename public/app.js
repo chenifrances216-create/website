@@ -288,6 +288,7 @@ function viewDeposit() {
   const methods = cfg.depositMethods || [];
   const pay = cfg.payments || {};
   const live = Boolean(pay.live);
+  const numbers = cfg.depositNumbers || [];
   const pending = state.pendingDeposit;
   const options = methods
     .map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`)
@@ -343,6 +344,18 @@ function viewDeposit() {
     ${pendingCard}
 
     <div class="card">
+      <div class="section-title"><h3>Deposit numbers</h3><span class="muted small">Send to any number below</span></div>
+      ${numbers.length
+        ? `<div class="kv">${numbers
+            .map((n) => `<div><span>${esc(n.method)} · ${esc(n.name)}</span><b>${esc(n.number)}</b></div>`)
+            .join('')}</div>`
+        : '<p class="small muted">No deposit numbers have been published yet. Contact support before sending money.</p>'}
+      ${numbers.some((n) => n.note)
+        ? `<p class="small muted" style="margin:12px 0 0">${numbers.filter((n) => n.note).map((n) => esc(n.note)).join(' · ')}</p>`
+        : ''}
+    </div>
+
+    <div class="card">
       <div class="section-title"><h3>Company accounts</h3></div>
       <div class="kv">
         ${methods
@@ -367,6 +380,10 @@ function viewWithdraw() {
       <p>Available profit: <strong>${tzs(u.balance)}</strong> · Capital ${tzs(u.capital)} is locked.</p>
     </section>
 
+    ${u.withdrawBlocked
+      ? `<div class="card"><div class="section-title"><h3>Withdrawals blocked</h3></div><p class="small muted">${esc(u.withdrawBlockReason || 'Withdrawals are blocked on this account. Please contact support.')}</p></div>`
+      : ''}
+
     ${windowNotice(u.withdrawal)}
 
     <div class="card">
@@ -388,8 +405,8 @@ function viewWithdraw() {
           <span>Phone number / account</span>
           <input type="text" name="account" id="withdraw-account" value="${esc(u.phone)}" required />
         </label>
-        <button class="btn btn-primary" type="submit" ${u.withdrawal && u.withdrawal.open ? '' : 'disabled'}>
-          ${u.withdrawal && u.withdrawal.open ? 'Request withdrawal' : 'Withdrawals closed'}
+        <button class="btn btn-primary" type="submit" ${u.withdrawal && u.withdrawal.open && !u.withdrawBlocked ? '' : 'disabled'}>
+          ${u.withdrawBlocked ? 'Withdrawals blocked' : u.withdrawal && u.withdrawal.open ? 'Request withdrawal' : 'Withdrawals closed'}
         </button>
         <p class="form-note">Requests made outside Monday – Friday, 10:00 – 17:00 EAT are not accepted.</p>
       </form>
