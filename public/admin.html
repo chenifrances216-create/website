@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Ship Transfer — Admin</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#07281b" />
+  <link rel="icon" href="/img/ships/level-1.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/admin.css" />
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <section id="login" class="login">
+    <form id="login-form" class="login-card">
+      <div class="brand-mark">⚓</div>
+      <h1>Admin Panel</h1>
+      <p class="muted">Control room access only</p>
+      <label>
+        Admin password
+        <input id="login-password" type="password" name="password" autocomplete="current-password" placeholder="Enter admin password" required />
+      </label>
+      <button class="btn primary" type="submit">Unlock panel</button>
+      <p id="login-error" class="error" hidden></p>
+    </form>
+  </section>
+
+  <div id="panel" class="panel" hidden>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <span class="brand-mark small">⚓</span>
+        <div>
+          <strong>Ship Transfer</strong>
+          <span class="muted tiny">Admin control room</span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="refresh" class="btn ghost small" type="button">Refresh</button>
+        <button id="logout" class="btn ghost small" type="button">Sign out</button>
+      </div>
+    </header>
+
+    <p id="default-warning" class="warning" hidden>
+      You are using the default admin password. Open <strong>Security</strong> and change it now.
+    </p>
+
+    <div id="stats" class="stats"></div>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="members" type="button">Members</button>
+      <button class="tab" data-tab="deposits" type="button">Deposits</button>
+      <button class="tab" data-tab="withdrawals" type="button">Withdrawals</button>
+      <button class="tab" data-tab="numbers" type="button">Deposit numbers</button>
+      <button class="tab" data-tab="security" type="button">Security</button>
+    </nav>
+
+    <main class="views">
+      <!-- Members -->
+      <section id="view-members" class="view">
+        <div class="toolbar">
+          <div class="chips" id="segments">
+            <button class="chip active" data-segment="all" type="button">All members</button>
+            <button class="chip" data-segment="active" type="button">Deposited &amp; renting</button>
+            <button class="chip" data-segment="registered" type="button">Registered only</button>
+            <button class="chip" data-segment="blocked" type="button">Withdrawals blocked</button>
+          </div>
+          <input id="search" class="search" type="search" placeholder="Search phone number" />
+        </div>
+        <div id="members-list" class="list"></div>
+        <div id="member-detail" class="detail" hidden></div>
+      </section>
+
+      <!-- Deposits -->
+      <section id="view-deposits" class="view" hidden>
+        <div class="toolbar">
+          <div class="chips" id="deposit-filter">
+            <button class="chip active" data-status="all" type="button">All</button>
+            <button class="chip" data-status="pending" type="button">Pending</button>
+            <button class="chip" data-status="completed" type="button">Approved</button>
+            <button class="chip" data-status="rejected" type="button">Rejected</button>
+          </div>
+        </div>
+        <div id="deposits-list" class="list"></div>
+      </section>
+
+      <!-- Withdrawals -->
+      <section id="view-withdrawals" class="view" hidden>
+        <div class="toolbar">
+          <div class="chips" id="withdraw-filter">
+            <button class="chip active" data-status="all" type="button">All</button>
+            <button class="chip" data-status="pending" type="button">Pending</button>
+            <button class="chip" data-status="completed" type="button">Paid</button>
+            <button class="chip" data-status="rejected" type="button">Rejected</button>
+          </div>
+        </div>
+        <div id="withdrawals-list" class="list"></div>
+      </section>
+
+      <!-- Deposit numbers -->
+      <section id="view-numbers" class="view" hidden>
+        <form id="number-form" class="card form-grid">
+          <h2>Add or edit a deposit number</h2>
+          <p class="muted tiny">Members see these numbers on their Deposit screen.</p>
+          <input type="hidden" name="id" />
+          <label>
+            Network
+            <input name="method" list="networks" placeholder="M-Pesa / Tigo Pesa" required />
+            <datalist id="networks">
+              <option value="M-Pesa"></option>
+              <option value="Tigo Pesa"></option>
+              <option value="Airtel Money"></option>
+              <option value="Halopesa"></option>
+            </datalist>
+          </label>
+          <label>
+            Deposit number
+            <input name="number" inputmode="tel" placeholder="0712 345 678" required />
+          </label>
+          <label>
+            Registered name
+            <input name="name" placeholder="Name on the number" required />
+          </label>
+          <label>
+            Note (optional)
+            <input name="note" placeholder="e.g. Use your phone number as reference" />
+          </label>
+          <div class="row">
+            <button class="btn primary" type="submit">Save number</button>
+            <button id="number-reset" class="btn ghost" type="button">Clear</button>
+          </div>
+        </form>
+        <div id="numbers-list" class="list"></div>
+      </section>
+
+      <!-- Security -->
+      <section id="view-security" class="view" hidden>
+        <form id="password-form" class="card form-grid">
+          <h2>Change admin password</h2>
+          <p class="muted tiny">This password is separate from every member account.</p>
+          <label>
+            Current password
+            <input name="current" type="password" autocomplete="current-password" required />
+          </label>
+          <label>
+            New password (min 8 characters)
+            <input name="next" type="password" autocomplete="new-password" minlength="8" required />
+          </label>
+          <button class="btn primary" type="submit">Update password</button>
+        </form>
+        <div class="card">
+          <h2>Activity log</h2>
+          <div id="audit-list" class="audit"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/admin.js"></script>
+</body>
+</html>
