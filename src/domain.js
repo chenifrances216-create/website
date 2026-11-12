@@ -247,7 +247,6 @@ function publicUser(state, user) {
   return {
     id: user.id,
     name: user.name,
-    email: user.email,
     phone: user.phone,
     role: user.role,
     vipLevel: user.vipLevel || 0,
@@ -291,13 +290,6 @@ function creditReferral(state, user, depositAmount) {
 }
 
 function register(state, input) {
-  const name = String(input.name || '').trim();
-  if (name.length < 2 || name.length > 60) {
-    throw new ApiError(400, 'Name is required (2 to 60 characters)');
-  }
-  const email = String(input.email || '').trim().toLowerCase();
-  if (!EMAIL_RE.test(email)) throw new ApiError(400, 'Enter a valid email address');
-
   const phone = normalizePhone(input.phone);
   if (!phone) throw new ApiError(400, 'Enter a valid phone number (e.g. 0712 345 678)');
 
@@ -305,8 +297,12 @@ function register(state, input) {
   if (password.length < 6) throw new ApiError(400, 'Password must be at least 6 characters');
   if (password.length > 100) throw new ApiError(400, 'Password is too long');
 
-  if (state.users.some((u) => u.email === email)) throw new ApiError(409, 'This email is already registered');
-  if (state.users.some((u) => u.phone === phone)) throw new ApiError(409, 'This phone number is already registered');
+  if (state.users.some((u) => u.phone === phone)) {
+    throw new ApiError(409, 'This phone number is already registered');
+  }
+
+  const typedName = String(input.name || '').trim();
+  const name = typedName.length >= 2 && typedName.length <= 60 ? typedName : 'Member';
 
   let referrer = null;
   const code = String(input.inviteCode || '').trim().toUpperCase();
@@ -318,7 +314,6 @@ function register(state, input) {
   const user = {
     id: db.newId(),
     name,
-    email,
     phone,
     passwordHash: hashPassword(password),
     referralCode: uniqueReferralCode(state),
@@ -344,13 +339,16 @@ function register(state, input) {
 }
 
 function login(state, input) {
-  const identifier = String(input.email || '').trim().toLowerCase();
-  if (!identifier) throw new ApiError(400, 'Enter your email or phone number');
+  const identifier = String(input.phone || input.email || '').trim();
+  if (!identifier) throw new ApiError(400, 'Enter your phone number');
   const phone = normalizePhone(identifier);
-  const user = state.users.find((u) => u.email === identifier || (phone && u.phone === phone));
+  const email = identifier.toLowerCase();
+  const user = state.users.find(
+    (u) => (phone && u.phone === phone) || (u.email && u.email === email)
+  );
   const password = String(input.password || '');
   if (!user || !verifyPassword(password, user.passwordHash)) {
-    throw new ApiError(401, 'Incorrect login details');
+    throw new ApiError(401, 'Incorrect phone number or password');
   }
   return user;
 }
