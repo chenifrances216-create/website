@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Ship Transfer — Deposit, Ships &amp; Withdrawals</title>
-  <meta name="description" content="Ship Transfer: deposit capital, rent a ship from our fleet, earn profit every business day and withdraw it." />
+  <title>Ship Transfer</title>
+  <meta name="description" content="Create your Ship Transfer account with your phone number and password." />
   <meta name="theme-color" content="#0f7a45" />
   <link rel="icon" href="/img/ships/level-1.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/styles.css" />
@@ -14,26 +14,12 @@
 
   <!-- ============ AUTH ============ -->
   <section id="auth-screen" class="auth">
-    <div class="auth-hero">
-      <div class="brand">
+    <div class="auth-card">
+      <div class="brand auth-brand">
         <span class="brand-mark">⚓</span>
         <span class="brand-text">Ship<b>Transfer</b></span>
       </div>
-      <h1>Own a ship.<br /><span class="gold-text">Earn every business day.</span></h1>
-      <p class="hero-copy">
-        Deposit capital, rent a vessel from the fleet and withdraw your profit.
-        Capital stays locked — profit is yours to take.
-      </p>
-      <ul class="hero-points">
-        <li><strong>13 ship levels</strong> from TZS 10,000 to TZS 1,000,000</li>
-        <li><strong>First profit 24 hours</strong> after renting a ship</li>
-        <li><strong>Withdraw Mon – Fri</strong>, 10:00 – 17:00 EAT · 10% fee</li>
-        <li><strong>10% referral bonus</strong> credited automatically</li>
-      </ul>
-      <img class="hero-ship" src="/img/ships/level-13.svg" alt="Cargo ship at sea" />
-    </div>
 
-    <div class="auth-card">
       <div class="tabs" role="tablist" aria-label="Account access">
         <button class="tab is-active" data-auth-tab="login" role="tab" aria-selected="true" type="button">Sign in</button>
         <button class="tab" data-auth-tab="register" role="tab" aria-selected="false" type="button">Create account</button>
@@ -41,8 +27,8 @@
 
       <form id="login-form" class="form" data-auth-pane="login" novalidate>
         <label class="field">
-          <span>Email or phone number</span>
-          <input type="text" name="email" autocomplete="username" placeholder="you@email.com or 0712 345 678" required />
+          <span>Phone number</span>
+          <input type="tel" name="phone" autocomplete="username" placeholder="0712 345 678" required />
         </label>
         <label class="field">
           <span>Password</span>
@@ -54,27 +40,15 @@
 
       <form id="register-form" class="form is-hidden" data-auth-pane="register" novalidate>
         <label class="field">
-          <span>Full name</span>
-          <input type="text" name="name" autocomplete="name" placeholder="Your full name" required />
-        </label>
-        <label class="field">
           <span>Phone number</span>
           <input type="tel" name="phone" autocomplete="tel" placeholder="0712 345 678" required />
-        </label>
-        <label class="field">
-          <span>Email</span>
-          <input type="email" name="email" autocomplete="email" placeholder="you@email.com" required />
         </label>
         <label class="field">
           <span>Password</span>
           <input type="password" name="password" autocomplete="new-password" placeholder="At least 6 characters" minlength="6" required />
         </label>
-        <label class="field">
-          <span>Invite code <em>(optional)</em></span>
-          <input type="text" name="inviteCode" id="register-invite" placeholder="SHIP12345" />
-        </label>
-        <button class="btn btn-primary" type="submit">Create account &amp; enter</button>
-        <p class="form-note">You get a TZS 1,000 welcome bonus. Your inviter earns 10% of your first deposit.</p>
+        <input type="hidden" name="inviteCode" id="register-invite" value="" />
+        <button class="btn btn-primary" type="submit">Create account</button>
       </form>
     </div>
   </section>
