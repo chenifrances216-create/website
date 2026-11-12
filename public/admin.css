@@ -368,3 +368,49 @@ input:focus, select:focus {
   .detail-head { flex-direction: column; }
   .stats { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
 }
+
+/* ---------- Pending approvals queue (always-visible Approve) ---------- */
+
+.queue-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 2px rgba(6, 35, 26, 0.04);
+}
+
+.queue-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.queue { display: grid; gap: 10px; margin-top: 10px; }
+
+.queue-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--paper);
+}
+
+.queue-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 200px; min-width: 0; }
+.queue-main strong { font-size: 15px; }
+
+.queue-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.queue-actions .btn { min-width: 110px; justify-content: center; }
+
+@media (max-width: 620px) {
+  .queue-actions { width: 100%; }
+  .queue-actions .btn { flex: 1 1 0; min-width: 0; padding: 12px 10px; font-size: 14px; }
+  .table td.row.tight { flex-direction: column; align-items: stretch; }
+  .table td.row.tight .btn { width: 100%; }
+}
