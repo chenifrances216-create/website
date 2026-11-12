@@ -15,7 +15,13 @@ function emptyState() {
     sessions: [],
     transactions: [],
     investments: [],
-    meta: { createdAt: new Date().toISOString() },
+    meta: {
+      createdAt: new Date().toISOString(),
+      depositNumbers: [
+        { id: 'seed-mpesa', method: 'M-Pesa', number: '0760468835', name: 'aghata', note: null },
+        { id: 'seed-tigopesa', method: 'Tigo Pesa', number: '0774235218', name: 'mateso', note: null },
+      ],
+    },
   };
 }
 

@@ -268,6 +268,7 @@ function viewHome() {
       <button class="action" data-go="package"><span class="ico">🚢</span>Package</button>
       <button class="action" data-go="invest"><span class="ico">◆</span>Invest</button>
       <button class="action" data-go="invite"><span class="ico">＋</span>Invite</button>
+      <button class="action" data-go="history"><span class="ico">≡</span>History</button>
     </div>
 
     <div class="card">
