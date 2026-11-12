@@ -127,6 +127,8 @@ const TXN_LABELS = {
   profit: 'Daily profit',
   signup_bonus: 'Welcome bonus',
   invite_bonus: 'Referral bonus',
+  admin_credit: 'Balance added by admin',
+  admin_debit: 'Balance reduced by admin',
 };
 
 const RULES = {
