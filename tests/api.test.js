@@ -344,3 +344,156 @@ test('ukurasa wa mwanzo unahudumiwa na jina la kampuni', async () => {
   assert.match(html, /Ship/);
   assert.match(html, /Jisajili/);
 });
+
+/* ---------------- Malipo ya simu: M-Pesa na Tigo Pesa ---------------- */
+const payments = require('../src/payments');
+
+test('config inaonyesha njia za malipo ya simu na hali ya sandbox', async () => {
+  const res = await call('/config');
+  assert.equal(res.status, 200);
+  assert.equal(res.data.payments.mode, 'sandbox');
+  assert.equal(res.data.payments.live, false);
+  assert.ok(res.data.payments.mobileMethods.includes('M-Pesa'));
+  assert.ok(res.data.payments.mobileMethods.includes('Tigo Pesa'));
+});
+
+test('payload ya malipo hutuma mtandao sahihi kwa kila mtandao', () => {
+  const mpesa = payments.buildChargePayload({
+    amount: 10000,
+    email: 'asha@example.com',
+    phone: '0712345678',
+    method: 'M-Pesa',
+    txRef: 'tx-1',
+    name: 'Asha',
+  });
+  assert.equal(mpesa.network, 'VODACOM');
+  assert.equal(mpesa.phone_number, '0712345678');
+  assert.equal(mpesa.currency, 'TZS');
+
+  const tigo = payments.buildChargePayload({
+    amount: 5000,
+    email: 'asha@example.com',
+    phone: '+255712345678',
+    method: 'Tigo Pesa',
+    txRef: 'tx-2',
+  });
+  assert.equal(tigo.network, 'TIGO');
+  assert.equal(tigo.phone_number, '0712345678');
+
+  assert.throws(
+    () => payments.buildChargePayload({ amount: 5000, email: 'a@b.c', phone: '123', method: 'M-Pesa', txRef: 'tx-3' }),
+    /Namba ya simu/,
+  );
+});
+
+test('amana ya M-Pesa: ombi la malipo, kisha salio linaingia mara moja', async () => {
+  const { token } = await registerUser();
+  const start = await call('/me', { token });
+  const before = start.data.user.balance;
+
+  const res = await call('/deposit', {
+    method: 'POST',
+    token,
+    body: { amount: 25000, method: 'M-Pesa', phone: '0712345678' },
+  });
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+  assert.equal(res.data.transaction.status, 'pending');
+  assert.equal(res.data.transaction.channel, 'mobile_money');
+  assert.equal(res.data.payment.mode, 'sandbox');
+  assert.match(res.data.transaction.providerRef, /^SBX-/);
+
+  const done = await call(`/deposit/${res.data.transaction.id}/simulate`, { method: 'POST', token });
+  assert.equal(done.status, 200, JSON.stringify(done.data));
+  assert.equal(done.data.transaction.status, 'completed');
+  assert.equal(done.data.user.balance, before + 25000);
+
+  const again = await call(`/deposit/${res.data.transaction.id}/simulate`, { method: 'POST', token });
+  assert.equal(again.status, 200);
+  assert.equal(again.data.credited, false);
+  assert.equal(again.data.user.balance, before + 25000);
+});
+
+test('amana ya Tigo Pesa inahitaji namba ya simu sahihi', async () => {
+  const { token } = await registerUser();
+  const res = await call('/deposit', {
+    method: 'POST',
+    token,
+    body: { amount: 25000, method: 'Tigo Pesa', phone: '123' },
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.data.error, /simu/i);
+});
+
+test('amana ya benki inabaki ya msimamizi na haiwezi kuigwa', async () => {
+  const { token } = await registerUser();
+  const res = await call('/deposit', {
+    method: 'POST',
+    token,
+    body: { amount: 30000, method: 'Benki', reference: 'CRDB-99' },
+  });
+  assert.equal(res.status, 201, JSON.stringify(res.data));
+  assert.equal(res.data.payment.status, 'manual');
+  assert.equal(res.data.transaction.channel, 'manual');
+
+  const sim = await call(`/deposit/${res.data.transaction.id}/simulate`, { method: 'POST', token });
+  assert.equal(sim.status, 400);
+});
+
+test('webhook huhitaji sahihi na hulipia amana mara moja tu', async () => {
+  const { token } = await registerUser();
+  const created = await call('/deposit', {
+    method: 'POST',
+    token,
+    body: { amount: 15000, method: 'M-Pesa', phone: '0712345678' },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  const txnId = created.data.transaction.id;
+  const before = created.data.user.balance;
+
+  const payload = JSON.stringify({
+    event: 'charge.completed',
+    data: { id: 998877, tx_ref: txnId, status: 'successful', amount: 15000, currency: 'TZS' },
+  });
+  const hook = (hash) =>
+    fetch(`${base}/api/payments/webhook/flutterwave`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'verif-hash': hash },
+      body: payload,
+    });
+
+  const bad = await hook('wrong-hash');
+  assert.equal(bad.status, 401);
+
+  process.env.FLW_WEBHOOK_HASH = 'test-hash-123';
+  try {
+    const ok = await hook('test-hash-123');
+    assert.equal(ok.status, 200);
+    const after = await call('/me', { token });
+    assert.equal(after.data.user.balance, before + 15000);
+
+    const dup = await hook('test-hash-123');
+    assert.equal(dup.status, 200);
+    const still = await call('/me', { token });
+    assert.equal(still.data.user.balance, before + 15000);
+  } finally {
+    delete process.env.FLW_WEBHOOK_HASH;
+  }
+});
+
+test('uigaji wa malipo huzuiwa pale funguo halisi zimewekwa', async () => {
+  const { token } = await registerUser();
+  const created = await call('/deposit', {
+    method: 'POST',
+    token,
+    body: { amount: 15000, method: 'Tigo Pesa', phone: '0712345678' },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+
+  process.env.FLW_SECRET_KEY = 'FLWSECK_TEST-dummy';
+  try {
+    const sim = await call(`/deposit/${created.data.transaction.id}/simulate`, { method: 'POST', token });
+    assert.equal(sim.status, 403);
+  } finally {
+    delete process.env.FLW_SECRET_KEY;
+  }
+});
