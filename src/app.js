@@ -14,6 +14,7 @@ const {
   INVITE_BONUS_INVITER,
 } = require('./constants');
 const { createSession, getSession, destroySession, hashPassword } = require('./auth');
+const payments = require('./payments');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
@@ -71,10 +72,49 @@ function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(securityHeaders);
-  app.use(express.json({ limit: '64kb' }));
 
   const state = db.getState();
   seedAdmin(state);
+
+  // Webhook ya mtoa huduma: inahitaji body ghafi kabla ya express.json
+  app.post('/api/payments/webhook/flutterwave', express.raw({ type: '*/*', limit: '128kb' }), (req, res) => {
+    if (!payments.verifyWebhook(req.get('verif-hash'))) {
+      return res.status(401).json({ error: 'Sahihi ya webhook si sahihi' });
+    }
+    let payload = null;
+    try {
+      payload = JSON.parse(req.body && req.body.length ? req.body.toString('utf8') : '{}');
+    } catch {
+      return res.status(400).json({ error: 'Data ya webhook si sahihi' });
+    }
+    const data = (payload && payload.data) || {};
+    const txn = domain.findDepositByRef(state, String(data.tx_ref || ''));
+    if (!txn) return res.status(404).json({ error: 'Muamala haupatikani' });
+
+    const status = String(data.status || '');
+    if (status !== 'successful') {
+      if (status === 'failed') {
+        domain.failDeposit(state, txn, data.processor_response || 'Malipo hayakufanikiwa');
+        db.commit();
+      }
+      return res.json({ ok: true, ignored: true });
+    }
+    try {
+      domain.completeDeposit(state, txn, {
+        providerRef: String(data.id || ''),
+        amount: data.amount != null ? Number(data.amount) : null,
+        currency: data.currency,
+        source: 'webhook',
+      });
+      db.commit();
+      return res.json({ ok: true });
+    } catch (err) {
+      db.commit();
+      return res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  app.use(express.json({ limit: '64kb' }));
 
   const authLimiter = rateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
 
@@ -107,6 +147,7 @@ function createApp() {
       inviteBonus: INVITE_BONUS_INVITER,
       depositMethods: DEPOSIT_METHODS,
       withdrawMethods: WITHDRAW_METHODS,
+      payments: payments.describe(),
       packages: PACKAGES.map(domain.serializePackage),
     });
   });
@@ -147,10 +188,115 @@ function createApp() {
     });
   });
 
-  app.post('/api/deposit', requireAuth, (req, res) => {
-    const txn = domain.createDeposit(state, req.user, req.body || {});
-    db.commit();
-    res.status(201).json({ transaction: domain.serializeTxn(txn), user: domain.publicUser(state, req.user) });
+  app.post('/api/deposit', requireAuth, async (req, res) => {
+    let txn = null;
+    try {
+      txn = domain.createDeposit(state, req.user, req.body || {});
+      db.commit();
+
+      if (!payments.isMobileMethod(txn.method)) {
+        return res.status(201).json({
+          transaction: domain.serializeTxn(txn),
+          user: domain.publicUser(state, req.user),
+          payment: {
+            mode: payments.mode(),
+            status: 'manual',
+            message: 'Ombi linasubiri uthibitisho wa msimamizi.',
+          },
+        });
+      }
+
+      const charge = await payments.initiateCharge({
+        amount: txn.amount,
+        currency: 'TZS',
+        email: req.user.email,
+        phone: txn.meta.phone,
+        method: txn.method,
+        txRef: txn.id,
+        name: req.user.name,
+      });
+      domain.attachPayment(txn, charge);
+      db.commit();
+
+      return res.status(201).json({
+        transaction: domain.serializeTxn(txn),
+        user: domain.publicUser(state, req.user),
+        payment: {
+          mode: payments.mode(),
+          provider: charge.provider,
+          providerRef: charge.providerRef,
+          status: charge.status,
+          message: charge.message,
+          sandbox: Boolean(charge.sandbox),
+        },
+      });
+    } catch (err) {
+      if (txn && txn.status === 'pending') domain.failDeposit(state, txn, err.message);
+      db.commit();
+      if (err instanceof domain.ApiError) return res.status(err.status).json({ error: err.message });
+      if (err instanceof payments.PaymentError) {
+        return res.status(err.status === 400 ? 400 : 502).json({ error: err.message });
+      }
+      console.error('[deposit]', err);
+      return res.status(500).json({ error: 'Hitilafu ya mfumo. Tafadhali jaribu tena.' });
+    }
+  });
+
+  // Hali ya amana: hukagua mtoa huduma na kukamilisha ikiwa imelipwa
+  app.get('/api/deposit/:id', requireAuth, async (req, res) => {
+    const txn = domain.findDeposit(state, req.user.id, req.params.id);
+    if (!txn) return res.status(404).json({ error: 'Amana haipo' });
+    const meta = txn.meta || {};
+
+    if (txn.status === 'pending' && meta.channel === 'mobile_money' && meta.providerRef && payments.isLive()) {
+      const remote = await payments.fetchCharge(meta.providerRef).catch(() => null);
+      if (remote && remote.status === 'successful') {
+        try {
+          domain.completeDeposit(state, txn, {
+            providerRef: meta.providerRef,
+            amount: Number.isFinite(remote.amount) ? remote.amount : null,
+            currency: remote.currency,
+            source: 'verify',
+          });
+        } catch (err) {
+          txn.meta = { ...(txn.meta || {}), verifyError: err.message };
+        }
+        db.commit();
+      } else if (remote && remote.status === 'failed') {
+        domain.failDeposit(state, txn, 'Malipo hayakufanikiwa');
+        db.commit();
+      }
+    }
+
+    res.json({
+      transaction: domain.serializeTxn(txn),
+      user: domain.publicUser(state, req.user),
+      payment: { mode: payments.mode(), status: txn.status },
+    });
+  });
+
+  // Uigaji wa malipo: hupatikana tu pale hakuna funguo halisi
+  app.post('/api/deposit/:id/simulate', requireAuth, (req, res) => {
+    if (payments.isLive()) {
+      return res.status(403).json({ error: 'Uigaji wa malipo haupatikani wakati malipo halisi yamewashwa' });
+    }
+    const txn = domain.findDeposit(state, req.user.id, req.params.id);
+    if (!txn) return res.status(404).json({ error: 'Amana haipo' });
+    if (txn.meta && txn.meta.channel !== 'mobile_money') {
+      return res.status(400).json({ error: 'Amana hii ni ya benki; msimamizi anaidhinisha' });
+    }
+    try {
+      const result = domain.completeDeposit(state, txn, { source: 'sandbox' });
+      db.commit();
+      return res.json({
+        credited: result.credited,
+        transaction: domain.serializeTxn(txn),
+        user: domain.publicUser(state, req.user),
+        payment: { mode: payments.mode(), status: txn.status },
+      });
+    } catch (err) {
+      return res.status(err.status || 500).json({ error: err.message });
+    }
   });
 
   app.post('/api/withdraw', requireAuth, (req, res) => {

@@ -16,6 +16,7 @@ const {
   TXN_LABELS,
 } = require('./constants');
 const { hashPassword, verifyPassword, destroyUserSessions } = require('./auth');
+const payments = require('./payments');
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -261,15 +262,89 @@ function createDeposit(state, user, input) {
     throw new ApiError(400, 'Chagua njia ya malipo sahihi');
   }
   const reference = String(input.reference || '').trim().slice(0, 60);
+  const mobile = payments.isMobileMethod(method);
+  let phone = null;
+  if (mobile) {
+    phone = normalizePhone(input.phone || user.phone);
+    if (!phone) throw new ApiError(400, 'Weka namba ya simu sahihi ya kulipia');
+  }
   return addTxn(state, {
     userId: user.id,
     type: 'deposit',
     amount,
     status: 'pending',
     method,
-    note: `Amana kupitia ${method}`,
-    meta: { reference },
+    note: mobile ? `Amana kupitia ${method} (malipo ya simu)` : `Amana kupitia ${method}`,
+    meta: {
+      reference,
+      phone,
+      network: mobile ? payments.networkFor(method) : null,
+      channel: mobile ? 'mobile_money' : 'manual',
+      provider: null,
+      providerRef: null,
+      paymentStatus: mobile ? 'initiated' : 'manual',
+    },
   });
+}
+
+function attachPayment(txn, payment) {
+  txn.meta = {
+    ...(txn.meta || {}),
+    provider: payment.provider || null,
+    providerRef: payment.providerRef || null,
+    paymentStatus: payment.status || 'pending',
+    paymentMessage: payment.message || null,
+    sandbox: Boolean(payment.sandbox),
+    initiatedAt: nowIso(),
+  };
+  return txn;
+}
+
+function failDeposit(state, txn, reason) {
+  if (!txn || txn.status !== 'pending') return txn;
+  txn.status = 'failed';
+  txn.decidedAt = nowIso();
+  txn.meta = { ...(txn.meta || {}), error: String(reason || 'Malipo hayakufanikiwa').slice(0, 200) };
+  return txn;
+}
+
+// Hukamilisha amana mara moja tu (idempotent) na kuongeza salio
+function completeDeposit(state, txn, info = {}) {
+  if (!txn) throw new ApiError(404, 'Amana haipo');
+  if (txn.type !== 'deposit') throw new ApiError(400, 'Muamala huu si amana');
+  const user = state.users.find((u) => u.id === txn.userId);
+  if (!user) throw new ApiError(404, 'Mtumiaji halipo');
+  if (txn.status === 'completed') return { credited: false, txn, user };
+  if (txn.status !== 'pending') throw new ApiError(400, 'Muamala huu hauwezi kuthibitishwa');
+
+  const paid = info.amount == null ? null : Number(info.amount);
+  if (paid != null && Number.isFinite(paid) && paid !== txn.amount) {
+    txn.meta = { ...(txn.meta || {}), amountMismatch: paid };
+    throw new ApiError(409, 'Kiasi kilicholipwa hakiendani na ombi. Msimamizi atahakiki.');
+  }
+  if (info.currency && String(info.currency).toUpperCase() !== 'TZS') {
+    throw new ApiError(400, 'Sarafu ya malipo si sahihi');
+  }
+
+  txn.status = 'completed';
+  txn.decidedAt = nowIso();
+  txn.meta = {
+    ...(txn.meta || {}),
+    providerRef: info.providerRef || (txn.meta && txn.meta.providerRef) || null,
+    paymentStatus: 'completed',
+    confirmedBy: info.source || 'provider',
+    paidAmount: paid != null ? paid : txn.amount,
+  };
+  user.balance += txn.amount;
+  return { credited: true, txn, user };
+}
+
+function findDeposit(state, userId, id) {
+  return state.transactions.find((t) => t.id === id && t.userId === userId && t.type === 'deposit') || null;
+}
+
+function findDepositByRef(state, txRef) {
+  return state.transactions.find((t) => t.id === txRef && t.type === 'deposit') || null;
 }
 
 function createWithdraw(state, user, input) {
@@ -361,6 +436,13 @@ function serializeTxn(txn) {
     method: txn.method,
     note: txn.note,
     reference: txn.meta && txn.meta.reference ? txn.meta.reference : null,
+    channel: (txn.meta && txn.meta.channel) || 'manual',
+    phone: (txn.meta && txn.meta.phone) || null,
+    provider: (txn.meta && txn.meta.provider) || null,
+    providerRef: (txn.meta && txn.meta.providerRef) || null,
+    paymentStatus: (txn.meta && txn.meta.paymentStatus) || null,
+    sandbox: Boolean(txn.meta && txn.meta.sandbox),
+    failureReason: (txn.meta && txn.meta.error) || null,
     adminNote: txn.adminNote || null,
     createdAt: txn.createdAt,
     decidedAt: txn.decidedAt || null,
@@ -407,8 +489,13 @@ module.exports = {
   ApiError,
   accrue,
   addTxn,
+  attachPayment,
   changePassword,
+  completeDeposit,
   createDeposit,
+  failDeposit,
+  findDeposit,
+  findDepositByRef,
   createInvestment,
   createWithdraw,
   decideRequest,
