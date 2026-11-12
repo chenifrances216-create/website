@@ -575,7 +575,7 @@ function createApp() {
 
   app.get(
     '/api/apanel/members',
-    adminRoute(() => ({ members: adminpanel.members(state) })),
+    adminRoute((req) => ({ members: adminpanel.members(state, req.query.segment) })),
   );
 
   app.get(
