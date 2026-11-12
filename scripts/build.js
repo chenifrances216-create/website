@@ -19,8 +19,6 @@ const required = [
   'public/index.html',
   'public/styles.css',
   'public/app.js',
-  'public/admin.html',
-  'public/admin.js',
 ];
 
 const missing = required.filter((file) => !fs.existsSync(path.join(root, file)));
