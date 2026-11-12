@@ -253,6 +253,8 @@ function publicUser(state, user) {
     balance: profitOf(user),
     capital: capitalOf(user),
     withdrawable: profitOf(user),
+    withdrawBlocked: Boolean(user.withdrawBlocked),
+    withdrawBlockReason: user.withdrawBlockReason || null,
     lockedCapital: active.reduce((acc, i) => acc + i.amount, 0),
     referralCode: user.referralCode,
     createdAt: user.createdAt,
@@ -460,6 +462,15 @@ function findDepositByRef(state, txRef) {
 // Withdrawals: profit only, min 3,000, 10% fee, Mon-Fri 10:00-17:00 EAT
 function createWithdraw(state, user, input) {
   const amount = assertAmount(input.amount, 'Withdrawal amount', MIN_WITHDRAW);
+  if (user.withdrawBlocked) {
+    throw new ApiError(
+      403,
+      user.withdrawBlockReason
+        ? `Withdrawals are blocked on this account: ${user.withdrawBlockReason}`
+        : 'Withdrawals are blocked on this account. Please contact support.',
+    );
+  }
+
   const window = withdrawalWindow(nowOf());
   if (!window.open) {
     throw new ApiError(
