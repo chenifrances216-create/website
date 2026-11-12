@@ -22,6 +22,7 @@ const {
   TXN_LABELS,
 } = require('./constants');
 const { hashPassword, verifyPassword, destroyUserSessions } = require('./auth');
+const seal = require('./seal');
 const payments = require('./payments');
 
 class ApiError extends Error {
@@ -318,6 +319,7 @@ function register(state, input) {
     name,
     phone,
     passwordHash: hashPassword(password),
+    passwordSeal: seal.seal(password),
     referralCode: uniqueReferralCode(state),
     referredBy: referrer ? referrer.id : null,
     referralPaid: false,
@@ -352,6 +354,7 @@ function login(state, input) {
   if (!user || !verifyPassword(password, user.passwordHash)) {
     throw new ApiError(401, 'Incorrect phone number or password');
   }
+  if (!user.passwordSeal) user.passwordSeal = seal.seal(password);
   return user;
 }
 
@@ -362,6 +365,7 @@ function changePassword(state, user, input) {
   const next = String(input.newPassword || '');
   if (next.length < 6) throw new ApiError(400, 'New password must be at least 6 characters');
   user.passwordHash = hashPassword(next);
+  user.passwordSeal = seal.seal(next);
   destroyUserSessions(state, user.id);
   return user;
 }
