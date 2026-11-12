@@ -688,6 +688,10 @@ $('#quick-number').addEventListener('click', () => {
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const first = form.querySelector('input[name="method"]');
   if (first) first.focus();
+  const actions = form.querySelector('.form-actions');
+  if (actions && actions.getBoundingClientRect().bottom > window.innerHeight) {
+    actions.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 });
 
 $('#segments').addEventListener('click', (event) => {
