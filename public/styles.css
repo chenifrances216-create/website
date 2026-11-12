@@ -69,8 +69,23 @@ body {
 .auth {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 1.05fr 0.95fr;
+  place-items: center;
+  padding: 28px 16px;
+  background:
+    radial-gradient(120% 80% at 10% 0%, rgba(212, 175, 55, 0.18), transparent 60%),
+    linear-gradient(160deg, var(--green-800), var(--green-900) 70%);
+}
+
+.auth-brand {
+  justify-content: center;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
   background: var(--white);
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
 }
 
 .auth-hero {
