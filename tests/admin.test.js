@@ -344,7 +344,7 @@ test('deposit numbers added in the panel reach the member deposit screen', async
 
   const listed = await call('/apanel/deposit-numbers', { token });
   assert.equal(listed.status, 200);
-  assert.ok(listed.data.numbers.some((n) => n.id === published.id));
+  assert.ok(listed.data.depositNumbers.some((n) => n.id === published.id));
 
   const removed = await call(`/apanel/deposit-numbers/${published.id}`, { method: 'DELETE', token });
   assert.equal(removed.status, 200);
@@ -372,7 +372,7 @@ test('pending deposits and withdrawals are listed and can be approved in the pan
   assert.ok(pending, 'the deposit reaches the panel queue');
   assert.equal(pending.member.phone, member.user.phone);
 
-  const approved = await call(`/apanel/requests/${pending.id}`, {
+  const approved = await call(`/apanel/requests/${pending.id}/decision`, {
     method: 'POST',
     token,
     body: { action: 'approve' },
