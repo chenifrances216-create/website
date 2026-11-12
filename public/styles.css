@@ -549,3 +549,20 @@ input, select { font: inherit; }
   .invite-link { flex-direction: column; }
   .card { padding: 16px; }
 }
+
+/* ---------- Malipo ya simu (M-Pesa / Tigo Pesa) ---------- */
+.pay-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.pay-method { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 12px; background: rgba(255,255,255,.03); color: inherit; cursor: pointer; text-align: left; font: inherit; }
+.pay-method:hover { border-color: rgba(255,255,255,.3); }
+.pay-method.is-active { border-color: #d4af37; background: rgba(212,175,55,.12); box-shadow: 0 0 0 1px rgba(212,175,55,.5) inset; }
+.pay-method__name { font-weight: 600; font-size: 14px; }
+.pay-method__hint { font-size: 12px; opacity: .7; }
+.pay-banner { margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: rgba(212,175,55,.12); border: 1px solid rgba(212,175,55,.35); font-size: 13px; line-height: 1.45; }
+.pay-banner code { font-size: 12px; word-break: break-all; }
+.pay-wait { display: flex; gap: 12px; align-items: flex-start; margin-top: 12px; padding: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); }
+.pay-wait__body { display: flex; flex-direction: column; gap: 6px; }
+.pay-wait__body p { margin: 0; font-size: 13px; }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); border-top-color: #d4af37; animation: spin 900ms linear infinite; flex: 0 0 auto; margin-top: 2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.field[hidden], .pay-wait[hidden], .pay-box[hidden], .pay-banner[hidden] { display: none !important; }
+.btn--sm { padding: 6px 10px; font-size: 12px; }
