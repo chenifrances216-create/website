@@ -34,6 +34,8 @@ class ApiError extends Error {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
 const REFERRAL_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+// Long invite codes keep shared invite links long and unique (SHIP + 12 chars = 16).
+const REFERRAL_CODE_CHARS = 12;
 
 function nowIso() {
   return new Date().toISOString();
@@ -150,12 +152,16 @@ function addTxn(state, { userId, type, amount, status = 'completed', method = nu
 function uniqueReferralCode(state) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     let code = 'SHIP';
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < REFERRAL_CODE_CHARS; i += 1) {
       code += REFERRAL_ALPHABET[crypto.randomInt(REFERRAL_ALPHABET.length)];
     }
     if (!state.users.some((u) => u.referralCode === code)) return code;
   }
-  return `SHIP${Date.now().toString(36).toUpperCase().slice(-5)}`;
+  let fallback = 'SHIP';
+  while (fallback.length < 4 + REFERRAL_CODE_CHARS) {
+    fallback += REFERRAL_ALPHABET[crypto.randomInt(REFERRAL_ALPHABET.length)];
+  }
+  return fallback;
 }
 
 function packageById(id) {
