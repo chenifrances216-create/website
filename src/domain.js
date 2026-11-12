@@ -89,7 +89,16 @@ function isBusinessDay(ts) {
   return WITHDRAW_DAYS.includes(eatParts(ts).weekday);
 }
 
-function withdrawalWindow(now = Date.now()) {
+// Clock seam: tests inject a fixed time so the withdrawal window is deterministic.
+let clock = () => Date.now();
+function setClock(fn) {
+  clock = typeof fn === 'function' ? fn : () => Date.now();
+}
+function nowOf() {
+  return clock();
+}
+
+function withdrawalWindow(now = nowOf()) {
   const { weekday, minutes } = eatParts(now);
   const weekdayOpen = WITHDRAW_DAYS.includes(weekday);
   const timeOpen = minutes >= WITHDRAW_OPEN_MINUTE && minutes < WITHDRAW_CLOSE_MINUTE;
@@ -186,7 +195,7 @@ function eligibleProfitDays(inv, now) {
 function nextPayoutAt(inv) {
   if (!inv || inv.status !== 'active') return null;
   const start = new Date(inv.startAt).getTime();
-  const now = Date.now();
+  const now = nowOf();
   let n = Math.max(1, Math.floor((now - start) / DAY_MS) + 1);
   for (let i = 0; i < 20; i += 1) {
     const at = start + n * DAY_MS;
@@ -196,7 +205,7 @@ function nextPayoutAt(inv) {
   return null;
 }
 
-function accrue(state, user, now = Date.now()) {
+function accrue(state, user, now = nowOf()) {
   let changed = false;
   for (const inv of state.investments) {
     if (inv.userId !== user.id || inv.status !== 'active') continue;
@@ -234,7 +243,7 @@ function publicUser(state, user) {
   const sum = (type) => completed.filter((t) => t.type === type).reduce((acc, t) => acc + t.amount, 0);
   const active = state.investments.filter((i) => i.userId === user.id && i.status === 'active');
   const pending = txns.filter((t) => t.status === 'pending');
-  const window = withdrawalWindow();
+  const window = withdrawalWindow(nowOf());
   return {
     id: user.id,
     name: user.name,
@@ -453,7 +462,7 @@ function findDepositByRef(state, txRef) {
 // Withdrawals: profit only, min 3,000, 10% fee, Mon-Fri 10:00-17:00 EAT
 function createWithdraw(state, user, input) {
   const amount = assertAmount(input.amount, 'Withdrawal amount', MIN_WITHDRAW);
-  const window = withdrawalWindow();
+  const window = withdrawalWindow(nowOf());
   if (!window.open) {
     throw new ApiError(
       400,
@@ -703,6 +712,8 @@ function inviteSummary(state, user) {
 }
 
 module.exports = {
+  setClock,
+  nowOf,
   ApiError,
   accrue,
   addTxn,
