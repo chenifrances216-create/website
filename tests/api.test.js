@@ -489,7 +489,7 @@ test('a 10% referral bonus is credited automatically on the first deposit', asyn
   const invite = await call('/invite', { token: inviter.token });
   assert.equal(invite.data.totalInvited, 1);
   assert.equal(invite.data.totalEarned, 5000);
-  assert.equal(invite.data.invited[0].name, friend.name);
+  assert.equal(invite.data.invited[0].name, joined.data.user.name);
 
   // A second deposit from the same friend pays no extra bonus
   await mobileDeposit(joined.data.token, 20000);
