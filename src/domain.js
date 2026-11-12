@@ -567,6 +567,7 @@ module.exports = {
   findWithdraw,
   findWithdrawByRef,
   startPayout,
+  createInvestment,
   inviteSummary,
   login,
   money,
