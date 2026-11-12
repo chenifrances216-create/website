@@ -289,6 +289,13 @@ function renderDetail() {
         <h3>Delete account</h3>
         <p class="muted tiny">Removes the member, their ships and their history permanently.</p>
         <button class="btn danger" id="delete-member" type="button">Delete this account</button>
+        <div id="delete-confirm" hidden>
+          <p class="muted tiny">Delete ${esc(m.phone)} permanently? This cannot be undone.</p>
+          <div class="row">
+            <button class="btn danger" id="delete-confirm-yes" type="button">Yes, delete account</button>
+            <button class="btn" id="delete-confirm-no" type="button">Cancel</button>
+          </div>
+        </div>
       </div>
     </div>`;
 
@@ -366,18 +373,35 @@ function renderDetail() {
     });
   }
 
-  $('#delete-member').addEventListener('click', async () => {
-    if (!window.confirm(`Delete account ${m.phone}? This cannot be undone.`)) return;
-    try {
-      await api(`/members/${m.id}`, { method: 'DELETE' });
-      state.selectedId = null;
-      state.revealed = null;
-      toast('Account deleted');
-      await loadAll();
-    } catch (err) {
-      toast(err.message, true);
-    }
+  $('#delete-member').addEventListener('click', () => {
+    const box = $('#delete-confirm');
+    if (box) box.hidden = false;
   });
+
+  const cancelDelete = $('#delete-confirm-no');
+  if (cancelDelete) {
+    cancelDelete.addEventListener('click', () => {
+      const box = $('#delete-confirm');
+      if (box) box.hidden = true;
+    });
+  }
+
+  const confirmDelete = $('#delete-confirm-yes');
+  if (confirmDelete) {
+    confirmDelete.addEventListener('click', async () => {
+      confirmDelete.disabled = true;
+      try {
+        await api(`/members/${m.id}`, { method: 'DELETE' });
+        state.selectedId = null;
+        state.revealed = null;
+        toast('Account deleted');
+        await loadAll();
+      } catch (err) {
+        confirmDelete.disabled = false;
+        toast(err.message, true);
+      }
+    });
+  }
 }
 
 // ---------- Deposit / withdraw ----------
