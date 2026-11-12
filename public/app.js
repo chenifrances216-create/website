@@ -537,10 +537,13 @@ function viewInvite() {
     </div>
 
     <div class="card">
-      <div class="section-title"><h3>Your invite code</h3></div>
+      <div class="section-title"><h3>Your invite link</h3></div>
       <div class="kv">
-        <div><span>Code</span><b>${esc(invite.code)}</b></div>
-        <div><span>Link</span><b style="word-break:break-all">${esc(link)}</b></div>
+        <div><span>Invite code</span><b>${esc(invite.code)}</b></div>
+      </div>
+      <div class="invite-link">
+        <span class="invite-link-label">Full invite link</span>
+        <b>${esc(link)}</b>
       </div>
       <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" data-action="copy-invite" data-link="${esc(link)}" type="button">Copy invite link</button>
