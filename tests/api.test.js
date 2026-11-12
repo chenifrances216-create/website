@@ -497,3 +497,178 @@ test('uigaji wa malipo huzuiwa pale funguo halisi zimewekwa', async () => {
     delete process.env.FLW_SECRET_KEY;
   }
 });
+
+/* ---------------- Utoaji wa kiotomatiki (payout) ---------------- */
+
+const payments = require('../src/payments');
+const domain = require('../src/domain');
+
+async function fundedUser(amount) {
+  const account = await registerUser();
+  const dep = await call('/deposit', {
+    method: 'POST',
+    token: account.token,
+    body: { amount, method: 'M-Pesa', phone: account.phone },
+  });
+  assert.equal(dep.status, 201, JSON.stringify(dep.data));
+  const sim = await call(`/deposit/${dep.data.transaction.id}/simulate`, {
+    method: 'POST',
+    token: account.token,
+  });
+  assert.equal(sim.status, 200, JSON.stringify(sim.data));
+  return { ...account, balance: sim.data.user.balance };
+}
+
+test('payout payload hutumia mtandao sahihi na namba ya ndani', () => {
+  const payload = payments.buildTransferPayload({
+    amount: 25000,
+    account: '+255712345678',
+    method: 'Tigo Pesa',
+    reference: 'ref-1',
+    beneficiaryName: 'Neema',
+  });
+  assert.equal(payload.account_bank, 'TIGO');
+  assert.equal(payload.account_number, '0712345678');
+  assert.equal(payload.amount, 25000);
+  assert.equal(payload.currency, 'TZS');
+  assert.equal(payload.reference, 'ref-1');
+
+  const mpesa = payments.buildTransferPayload({ amount: 9000, account: '0712345678', method: 'M-Pesa', reference: 'r2' });
+  assert.equal(mpesa.account_bank, 'VODACOM');
+
+  assert.throws(() => payments.buildTransferPayload({ amount: 5000, account: '0712345678', method: 'Benki', reference: 'r3' }));
+  assert.throws(() => payments.buildTransferPayload({ amount: 5000, account: '12', method: 'M-Pesa', reference: 'r4' }));
+  assert.throws(() => payments.buildTransferPayload({ amount: 0, account: '0712345678', method: 'M-Pesa', reference: 'r5' }));
+});
+
+test('utoaji wa simu hulipwa kiotomatiki msimamizi akikubali', async () => {
+  const admin = await adminToken();
+  const account = await fundedUser(60000);
+
+  const created = await call('/withdraw', {
+    method: 'POST',
+    token: account.token,
+    body: { amount: 20000, method: 'Tigo Pesa', account: account.phone },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  assert.equal(created.data.payout.automatic, true);
+  assert.equal(created.data.user.balance, account.balance - 20000);
+
+  const approved = await call(`/admin/transactions/${created.data.transaction.id}/decision`, {
+    method: 'POST',
+    token: admin,
+    body: { action: 'approve' },
+  });
+  assert.equal(approved.status, 200, JSON.stringify(approved.data));
+  assert.equal(approved.data.transaction.status, 'completed');
+  assert.equal(approved.data.transaction.payoutStatus, 'completed');
+  assert.equal(approved.data.transaction.channel, 'mobile_money');
+  assert.equal(approved.data.payout.sandbox, true);
+
+  const owner = db.getState().users.find((u) => u.id === account.user.id);
+  assert.equal(owner.paidOut, 20000);
+
+  const again = await call(`/admin/transactions/${created.data.transaction.id}/decision`, {
+    method: 'POST',
+    token: admin,
+    body: { action: 'approve' },
+  });
+  assert.equal(again.status, 400);
+
+  const status = await call(`/withdraw/${created.data.transaction.id}`, { token: account.token });
+  assert.equal(status.status, 200);
+  assert.equal(status.data.transaction.status, 'completed');
+});
+
+test('webhook ya utoaji hulipia mara moja tu', async () => {
+  process.env.FLW_WEBHOOK_HASH = 'test-hash';
+  try {
+    const account = await fundedUser(50000);
+    const created = await call('/withdraw', {
+      method: 'POST',
+      token: account.token,
+      body: { amount: 15000, method: 'M-Pesa', account: account.phone },
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+
+    const state = db.getState();
+    const txn = state.transactions.find((t) => t.id === created.data.transaction.id);
+    domain.startPayout(state, txn, { provider: 'flutterwave', providerRef: 'FLW-T-1' });
+    db.commit();
+
+    const body = JSON.stringify({
+      event: 'transfer.completed',
+      data: { id: 'FLW-T-1', reference: txn.id, status: 'SUCCESSFUL', amount: 15000 },
+    });
+    const send = () =>
+      fetch(`${base}/api/payments/webhook/flutterwave`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'verif-hash': 'test-hash' },
+        body,
+      });
+
+    const first = await send();
+    assert.equal(first.status, 200);
+    const second = await send();
+    assert.equal(second.status, 200);
+
+    assert.equal(txn.status, 'completed');
+    assert.equal(txn.meta.payoutStatus, 'completed');
+    const owner = state.users.find((u) => u.id === account.user.id);
+    assert.equal(owner.paidOut, 15000);
+  } finally {
+    delete process.env.FLW_WEBHOOK_HASH;
+  }
+});
+
+test('webhook isiyo na sahihi haikubaliwi', async () => {
+  const response = await fetch(`${base}/api/payments/webhook/flutterwave`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'verif-hash': 'wrong' },
+    body: JSON.stringify({ event: 'transfer.completed', data: { reference: 'hack', status: 'SUCCESSFUL' } }),
+  });
+  assert.equal(response.status, 401);
+});
+
+test('utoaji ukishindikana unarudi kwenye foleni', async () => {
+  const account = await fundedUser(40000);
+  const created = await call('/withdraw', {
+    method: 'POST',
+    token: account.token,
+    body: { amount: 12000, method: 'M-Pesa', account: account.phone },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+
+  const state = db.getState();
+  const txn = state.transactions.find((t) => t.id === created.data.transaction.id);
+  domain.startPayout(state, txn, { provider: 'flutterwave', providerRef: 'FLW-T-2' });
+  domain.failPayout(state, txn, 'Salio la mtoa huduma halitoshi');
+  db.commit();
+
+  const status = await call(`/withdraw/${txn.id}`, { token: account.token });
+  assert.equal(status.status, 200);
+  assert.equal(status.data.transaction.status, 'pending');
+  assert.equal(status.data.transaction.payoutStatus, 'failed');
+  assert.equal(status.data.transaction.failureReason, 'Salio la mtoa huduma halitoshi');
+});
+
+test('utoaji wa benki unabaki kwa idhini ya msimamizi', async () => {
+  const admin = await adminToken();
+  const account = await fundedUser(30000);
+  const created = await call('/withdraw', {
+    method: 'POST',
+    token: account.token,
+    body: { amount: 10000, method: 'Benki', account: 'CRDB 0150123456' },
+  });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  assert.equal(created.data.payout.automatic, false);
+
+  const approved = await call(`/admin/transactions/${created.data.transaction.id}/decision`, {
+    method: 'POST',
+    token: admin,
+    body: { action: 'approve' },
+  });
+  assert.equal(approved.status, 200, JSON.stringify(approved.data));
+  assert.equal(approved.data.transaction.status, 'completed');
+  assert.equal(approved.data.transaction.channel, 'manual');
+});
